@@ -4,6 +4,14 @@ import Groq from "groq-sdk";
 import { storage } from "./storage";
 import { sendMessageSchema, renameConversationSchema } from "@shared/schema";
 import { ZodError } from "zod";
+import {
+  handleLogin,
+  handleCallback,
+  getStatus,
+  playerAction,
+  getNowPlaying,
+  disconnect,
+} from "./spotify";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -38,6 +46,39 @@ async function generateTitle(firstMessage: string): Promise<string> {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // ── Spotify OAuth ──────────────────────────────────────────────────────────
+  app.get("/api/spotify/login", handleLogin);
+  app.get("/api/spotify/callback", handleCallback);
+  app.get("/api/spotify/status", async (_req, res) => {
+    try {
+      const status = await getStatus();
+      res.json(status);
+    } catch {
+      res.status(500).json({ error: "Failed to get Spotify status" });
+    }
+  });
+  app.get("/api/spotify/now-playing", async (_req, res) => {
+    try {
+      const nowPlaying = await getNowPlaying();
+      res.json({ nowPlaying });
+    } catch {
+      res.status(500).json({ error: "Failed to get now playing" });
+    }
+  });
+  app.post("/api/spotify/player/:action", async (req, res) => {
+    try {
+      const ok = await playerAction(req.params.action);
+      res.json({ success: ok });
+    } catch {
+      res.status(500).json({ error: "Player action failed" });
+    }
+  });
+  app.post("/api/spotify/disconnect", (_req, res) => {
+    disconnect();
+    res.json({ success: true });
+  });
+
+  // ── Conversations ──────────────────────────────────────────────────────────
   app.get("/api/conversations", async (_req, res) => {
     try {
       const conversations = await storage.getConversations();
@@ -88,6 +129,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Chat ───────────────────────────────────────────────────────────────────
   app.post("/api/chat", async (req, res) => {
     try {
       const { conversationId, content } = sendMessageSchema.parse(req.body);
@@ -104,7 +146,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const now = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-
       await storage.addMessage(convId, { role: "user", content, timestamp: now });
 
       const updatedConversation = await storage.getConversation(convId);
@@ -113,10 +154,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         content: m.content,
       }));
 
+      // Inject Spotify context into system prompt if connected
+      let systemPrompt = SYSTEM_PROMPT;
+      try {
+        const nowPlaying = await getNowPlaying();
+        if (nowPlaying) {
+          const np = nowPlaying as { trackName: string; artistName: string; albumName: string; isPlaying: boolean };
+          systemPrompt += `\n\nContext: The user is currently ${np.isPlaying ? "listening to" : "has paused"} "${np.trackName}" by ${np.artistName} from the album "${np.albumName}" on Spotify. You can naturally reference this if relevant, but don't force it into every response.`;
+        }
+      } catch {
+        // Spotify not connected or error — skip context
+      }
+
       const response = await groq.chat.completions.create({
         model: "llama-3.3-70b-versatile",
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: systemPrompt },
           ...historyMessages,
         ],
         max_tokens: 8192,

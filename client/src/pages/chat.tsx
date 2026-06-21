@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, Menu, Search, Pencil, Check, X } from "lucide-react";
+import { Plus, Menu, Search, Check, X } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,7 @@ import ChatInput from "@/components/ChatInput";
 import TypingIndicator from "@/components/TypingIndicator";
 import EmptyState from "@/components/EmptyState";
 import ThemeToggle from "@/components/ThemeToggle";
+import SpotifyPlayer from "@/components/SpotifyPlayer";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import type { Conversation } from "@shared/schema";
@@ -24,6 +25,20 @@ export default function Chat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  // Handle Spotify OAuth redirect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const spotifyStatus = params.get("spotify");
+    if (spotifyStatus === "connected") {
+      toast({ title: "Spotify connected!", description: "Your Spotify account is now linked." });
+      window.history.replaceState({}, "", "/");
+      queryClient.invalidateQueries({ queryKey: ["/api/spotify/status"] });
+    } else if (spotifyStatus === "error") {
+      toast({ title: "Spotify connection failed", description: "Please try connecting again.", variant: "destructive" });
+      window.history.replaceState({}, "", "/");
+    }
+  }, []);
 
   const { data: conversations = [], isLoading: loadingConversations } = useQuery<Conversation[]>({
     queryKey: ["/api/conversations"],
@@ -235,6 +250,9 @@ export default function Chat() {
             </div>
           ))}
         </div>
+
+        {/* Spotify Player pinned at sidebar bottom */}
+        <SpotifyPlayer />
       </div>
 
       {/* Main */}
