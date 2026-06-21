@@ -1,4 +1,6 @@
 import type { Request, Response } from "express";
+import { readFileSync, writeFileSync, existsSync } from "fs";
+import { join } from "path";
 
 const SCOPES = [
   "user-read-currently-playing",
@@ -7,6 +9,8 @@ const SCOPES = [
   "user-read-recently-played",
   "user-top-read",
 ].join(" ");
+
+const CONFIG_FILE = join(process.cwd(), ".spotify-config.json");
 
 interface SpotifyConfig {
   clientId: string;
@@ -20,12 +24,35 @@ interface TokenStore {
   expiresAt: number;
 }
 
-// Mutable config — seeded from env vars, overridable at runtime
-let config: SpotifyConfig = {
-  clientId: process.env.SPOTIFY_CLIENT_ID || "",
-  clientSecret: process.env.SPOTIFY_CLIENT_SECRET || "",
-  redirectUri: process.env.SPOTIFY_REDIRECT_URI || "",
-};
+function loadConfig(): SpotifyConfig {
+  // File takes priority over env vars so UI changes persist across restarts
+  if (existsSync(CONFIG_FILE)) {
+    try {
+      const saved = JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+      return {
+        clientId: saved.clientId || process.env.SPOTIFY_CLIENT_ID || "",
+        clientSecret: saved.clientSecret || process.env.SPOTIFY_CLIENT_SECRET || "",
+        redirectUri: saved.redirectUri || process.env.SPOTIFY_REDIRECT_URI || "",
+      };
+    } catch { /* fall through */ }
+  }
+  return {
+    clientId: process.env.SPOTIFY_CLIENT_ID || "",
+    clientSecret: process.env.SPOTIFY_CLIENT_SECRET || "",
+    redirectUri: process.env.SPOTIFY_REDIRECT_URI || "",
+  };
+}
+
+function saveConfig(cfg: SpotifyConfig) {
+  try {
+    writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), "utf-8");
+  } catch (e) {
+    console.error("Failed to persist Spotify config:", e);
+  }
+}
+
+// Mutable config — loaded from disk, falls back to env vars
+let config: SpotifyConfig = loadConfig();
 
 let tokenStore: TokenStore | null = null;
 
@@ -40,6 +67,7 @@ export function getConfig() {
 
 export function updateConfig(updates: Partial<SpotifyConfig>) {
   config = { ...config, ...updates };
+  saveConfig(config);
   // Reset auth when credentials change
   tokenStore = null;
 }
@@ -102,6 +130,7 @@ async function spotifyFetch(path: string, options: RequestInit = {}): Promise<Re
 }
 
 export function handleLogin(_req: Request, res: Response) {
+  console.log("[Spotify] Login attempt — configured:", isConfigured(), "| clientId:", config.clientId ? config.clientId.slice(0, 6) + "…" : "(empty)", "| redirectUri:", config.redirectUri || "(empty)");
   if (!isConfigured()) {
     return res.redirect("/?spotify=not-configured");
   }
@@ -112,11 +141,13 @@ export function handleLogin(_req: Request, res: Response) {
     scope: SCOPES,
     show_dialog: "true",
   });
+  console.log("[Spotify] Redirecting to Spotify authorize with redirectUri:", config.redirectUri);
   res.redirect(`https://accounts.spotify.com/authorize?${params}`);
 }
 
 export async function handleCallback(req: Request, res: Response) {
   const { code, error } = req.query as { code?: string; error?: string };
+  console.log("[Spotify] Callback hit — code:", !!code, "| error:", error || "none");
   if (error || !code) return res.redirect("/?spotify=error");
   try {
     const tokenRes = await fetch("https://accounts.spotify.com/api/token", {

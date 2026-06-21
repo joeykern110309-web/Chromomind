@@ -35,7 +35,10 @@ export default function Chat() {
       window.history.replaceState({}, "", "/");
       queryClient.invalidateQueries({ queryKey: ["/api/spotify/status"] });
     } else if (spotifyStatus === "error") {
-      toast({ title: "Spotify connection failed", description: "Please try connecting again.", variant: "destructive" });
+      toast({ title: "Spotify connection failed", description: "Check that your Client ID, Secret and Redirect URI are correct.", variant: "destructive" });
+      window.history.replaceState({}, "", "/");
+    } else if (spotifyStatus === "not-configured") {
+      toast({ title: "Spotify not configured", description: "Click the gear icon and enter your credentials first.", variant: "destructive" });
       window.history.replaceState({}, "", "/");
     }
   }, []);
