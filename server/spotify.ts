@@ -212,6 +212,33 @@ export async function playerAction(action: string): Promise<boolean> {
   return res !== null && (res.ok || res.status === 204);
 }
 
+export async function searchAndPlay(query: string): Promise<{ success: boolean; trackName?: string; artistName?: string; error?: string }> {
+  try {
+    const searchRes = await spotifyFetch(`/search?q=${encodeURIComponent(query)}&type=track&limit=1`);
+    if (!searchRes || !searchRes.ok) return { success: false, error: "Search failed" };
+    const data = await searchRes.json();
+    const track = data.tracks?.items?.[0];
+    if (!track) return { success: false, error: "No tracks found" };
+
+    const playRes = await spotifyFetch("/me/player/play", {
+      method: "PUT",
+      body: JSON.stringify({ uris: [track.uri] }),
+    });
+
+    if (!playRes || (!playRes.ok && playRes.status !== 204)) {
+      return { success: false, error: "Playback failed — make sure Spotify is open on a device" };
+    }
+
+    return {
+      success: true,
+      trackName: track.name,
+      artistName: track.artists.map((a: { name: string }) => a.name).join(", "),
+    };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
 export async function getStatus() {
   if (!tokenStore) return { connected: false, nowPlaying: null, configured: isConfigured() };
   const nowPlaying = await getNowPlaying();

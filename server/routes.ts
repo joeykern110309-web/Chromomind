@@ -13,6 +13,7 @@ import {
   disconnect,
   getConfig,
   updateConfig,
+  searchAndPlay,
 } from "./spotify";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -146,6 +147,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ── Chat ───────────────────────────────────────────────────────────────────
+  const SPOTIFY_TOOLS: Groq.Chat.ChatCompletionTool[] = [
+    {
+      type: "function",
+      function: {
+        name: "spotify_search_play",
+        description: "Search for a song, artist, or album on Spotify and play it immediately.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Search query e.g. 'Blinding Lights The Weeknd' or 'lo-fi beats'" },
+          },
+          required: ["query"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "spotify_control",
+        description: "Control Spotify playback: play, pause, skip to next track, or go to previous track.",
+        parameters: {
+          type: "object",
+          properties: {
+            action: { type: "string", enum: ["play", "pause", "next", "previous"], description: "The playback action to perform." },
+          },
+          required: ["action"],
+        },
+      },
+    },
+  ];
+
   app.post("/api/chat", async (req, res) => {
     try {
       const { conversationId, content } = sendMessageSchema.parse(req.body);
@@ -170,28 +202,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
         content: m.content,
       }));
 
-      // Inject Spotify context into system prompt if connected
+      // Inject Spotify now-playing context
       let systemPrompt = SYSTEM_PROMPT;
+      let spotifyConnected = false;
       try {
         const nowPlaying = await getNowPlaying();
         if (nowPlaying) {
+          spotifyConnected = true;
           const np = nowPlaying as { trackName: string; artistName: string; albumName: string; isPlaying: boolean };
-          systemPrompt += `\n\nContext: The user is currently ${np.isPlaying ? "listening to" : "has paused"} "${np.trackName}" by ${np.artistName} from the album "${np.albumName}" on Spotify. You can naturally reference this if relevant, but don't force it into every response.`;
+          systemPrompt += `\n\nSpotify context: The user is currently ${np.isPlaying ? "listening to" : "paused on"} "${np.trackName}" by ${np.artistName} from "${np.albumName}". You can reference this naturally if relevant.`;
         }
-      } catch {
-        // Spotify not connected or error — skip context
-      }
+        const status = await getStatus();
+        if (status.connected) spotifyConnected = true;
+      } catch { /* not connected */ }
 
-      const response = await groq.chat.completions.create({
+      systemPrompt += `\n\nYou have access to Spotify tools${spotifyConnected ? " and the user's Spotify is connected" : " but Spotify is not connected"}. Use spotify_search_play when the user asks to play a specific song/artist/genre. Use spotify_control for play, pause, skip, previous. Only call tools when the user clearly wants music control — don't call them for general music discussion.`;
+
+      // First LLM call — may request tool use
+      const firstResponse = await groq.chat.completions.create({
         model: "llama-3.3-70b-versatile",
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...historyMessages,
-        ],
+        messages: [{ role: "system", content: systemPrompt }, ...historyMessages],
+        tools: spotifyConnected ? SPOTIFY_TOOLS : undefined,
+        tool_choice: spotifyConnected ? "auto" : undefined,
         max_tokens: 8192,
       });
 
-      const aiContent = response.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
+      const firstChoice = firstResponse.choices[0];
+      let aiContent: string;
+
+      if (firstChoice.finish_reason === "tool_calls" && firstChoice.message.tool_calls?.length) {
+        // Execute all tool calls
+        const toolResults: Groq.Chat.ChatCompletionMessageParam[] = [];
+
+        for (const toolCall of firstChoice.message.tool_calls) {
+          let toolResult = "";
+          try {
+            const args = JSON.parse(toolCall.function.arguments);
+            if (toolCall.function.name === "spotify_search_play") {
+              const result = await searchAndPlay(args.query);
+              toolResult = result.success
+                ? `Successfully playing "${result.trackName}" by ${result.artistName}.`
+                : `Failed: ${result.error}`;
+            } else if (toolCall.function.name === "spotify_control") {
+              const ok = await playerAction(args.action);
+              toolResult = ok ? `Playback action "${args.action}" completed.` : `Action "${args.action}" failed — make sure Spotify is open on a device.`;
+            }
+          } catch (e) {
+            toolResult = `Tool error: ${String(e)}`;
+          }
+          toolResults.push({ role: "tool", tool_call_id: toolCall.id, content: toolResult });
+        }
+
+        // Second LLM call — generate natural response after tool execution
+        const secondResponse = await groq.chat.completions.create({
+          model: "llama-3.3-70b-versatile",
+          messages: [
+            { role: "system", content: systemPrompt },
+            ...historyMessages,
+            firstChoice.message,
+            ...toolResults,
+          ],
+          max_tokens: 1024,
+        });
+        aiContent = secondResponse.choices[0]?.message?.content || "Done!";
+      } else {
+        aiContent = firstChoice.message?.content || "I'm sorry, I couldn't generate a response.";
+      }
 
       const assistantMessage = await storage.addMessage(convId, {
         role: "assistant",
