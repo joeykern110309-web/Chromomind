@@ -1,13 +1,13 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { storage } from "./storage";
 import { sendMessageSchema, renameConversationSchema } from "@shared/schema";
 import { ZodError } from "zod";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-const SYSTEM_PROMPT = `You are a warm, intelligent, and curious AI assistant. You communicate naturally and humanly — like a knowledgeable friend who genuinely enjoys conversation. 
+const SYSTEM_PROMPT = `You are a warm, intelligent, and curious AI assistant. You communicate naturally and humanly — like a knowledgeable friend who genuinely enjoys conversation.
 
 Guidelines:
 - Be conversational, warm, and engaging — not robotic or overly formal
@@ -21,17 +21,11 @@ Guidelines:
 
 async function generateTitle(firstMessage: string): Promise<string> {
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "user",
-          content: `Generate a short, descriptive title (4-6 words max) for a conversation that starts with this message. Return ONLY the title, no quotes or punctuation: "${firstMessage.slice(0, 200)}"`,
-        },
-      ],
-      max_tokens: 20,
-    });
-    return response.choices[0]?.message?.content?.trim() || "New Conversation";
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const result = await model.generateContent(
+      `Generate a short, descriptive title (4-6 words max) for a conversation that starts with this message. Return ONLY the title, no quotes or punctuation: "${firstMessage.slice(0, 200)}"`
+    );
+    return result.response.text().trim() || "New Conversation";
   } catch {
     return firstMessage.slice(0, 50);
   }
@@ -42,7 +36,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const conversations = await storage.getConversations();
       res.json(conversations);
-    } catch (e) {
+    } catch {
       res.status(500).json({ error: "Failed to fetch conversations" });
     }
   });
@@ -52,7 +46,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const conversation = await storage.getConversation(req.params.id);
       if (!conversation) return res.status(404).json({ error: "Conversation not found" });
       res.json(conversation);
-    } catch (e) {
+    } catch {
       res.status(500).json({ error: "Failed to fetch conversation" });
     }
   });
@@ -61,7 +55,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const conversation = await storage.createConversation("New Conversation");
       res.json(conversation);
-    } catch (e) {
+    } catch {
       res.status(500).json({ error: "Failed to create conversation" });
     }
   });
@@ -83,7 +77,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const deleted = await storage.deleteConversation(req.params.id);
       if (!deleted) return res.status(404).json({ error: "Conversation not found" });
       res.json({ success: true });
-    } catch (e) {
+    } catch {
       res.status(500).json({ error: "Failed to delete conversation" });
     }
   });
@@ -105,27 +99,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const now = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
-      const userMessage = await storage.addMessage(convId, {
-        role: "user",
-        content,
-        timestamp: now,
-      });
+      await storage.addMessage(convId, { role: "user", content, timestamp: now });
 
       const updatedConversation = await storage.getConversation(convId);
-      const historyMessages = (updatedConversation?.messages || []).map((m) => ({
-        role: m.role as "user" | "assistant" | "system",
-        content: m.content,
+      const history = (updatedConversation?.messages || []).slice(0, -1).map((m) => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }],
       }));
 
-      const aiResponse = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          ...historyMessages,
-        ],
+      const model = genAI.getGenerativeModel({
+        model: "gemini-2.0-flash",
+        systemInstruction: SYSTEM_PROMPT,
       });
 
-      const aiContent = aiResponse.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
+      const chat = model.startChat({ history });
+      const result = await chat.sendMessage(content);
+      const aiContent = result.response.text() || "I'm sorry, I couldn't generate a response.";
 
       const assistantMessage = await storage.addMessage(convId, {
         role: "assistant",
@@ -142,7 +131,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({
         conversationId: convId,
-        userMessage,
         assistantMessage,
         conversation: finalConversation,
       });
