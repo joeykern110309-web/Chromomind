@@ -11,6 +11,8 @@ import {
   playerAction,
   getNowPlaying,
   disconnect,
+  getConfig,
+  updateConfig,
 } from "./spotify";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -46,6 +48,20 @@ async function generateTitle(firstMessage: string): Promise<string> {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // ── Spotify Config ─────────────────────────────────────────────────────────
+  app.get("/api/spotify/config", (_req, res) => {
+    res.json(getConfig());
+  });
+  app.post("/api/spotify/config", (req, res) => {
+    const { clientId, clientSecret, redirectUri } = req.body;
+    updateConfig({
+      ...(clientId !== undefined ? { clientId } : {}),
+      ...(clientSecret !== undefined ? { clientSecret } : {}),
+      ...(redirectUri !== undefined ? { redirectUri } : {}),
+    });
+    res.json({ success: true });
+  });
+
   // ── Spotify OAuth ──────────────────────────────────────────────────────────
   app.get("/api/spotify/login", handleLogin);
   app.get("/api/spotify/callback", handleCallback);

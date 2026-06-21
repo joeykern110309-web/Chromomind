@@ -3,6 +3,7 @@ import { SkipBack, SkipForward, Play, Pause, Music, LogIn, LogOut } from "lucide
 import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
+import SpotifySettings from "@/components/SpotifySettings";
 
 interface NowPlaying {
   isPlaying: boolean;
@@ -67,10 +68,11 @@ export default function SpotifyPlayer() {
           <div className="w-8 h-8 rounded-full bg-[#1DB954]/20 flex items-center justify-center flex-shrink-0">
             <Music className="w-4 h-4 text-[#1DB954]" />
           </div>
-          <div>
+          <div className="flex-1 min-w-0">
             <p className="text-xs font-semibold text-sidebar-foreground">Spotify</p>
             <p className="text-xs text-muted-foreground">Not connected</p>
           </div>
+          <SpotifySettings />
         </div>
         <a href="/api/spotify/login" data-testid="button-spotify-connect">
           <Button size="sm" className="w-full gap-2 bg-[#1DB954] hover:bg-[#1DB954] text-black font-semibold">
@@ -115,16 +117,19 @@ export default function SpotifyPlayer() {
             </>
           )}
         </div>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="flex-shrink-0 opacity-60"
-          onClick={() => disconnectMutation.mutate()}
-          data-testid="button-spotify-disconnect"
-          title="Disconnect Spotify"
-        >
-          <LogOut className="w-3 h-3" />
-        </Button>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <SpotifySettings />
+          <Button
+            size="icon"
+            variant="ghost"
+            className="opacity-60"
+            onClick={() => disconnectMutation.mutate()}
+            data-testid="button-spotify-disconnect"
+            title="Disconnect Spotify"
+          >
+            <LogOut className="w-3 h-3" />
+          </Button>
+        </div>
       </div>
 
       {/* Progress bar */}

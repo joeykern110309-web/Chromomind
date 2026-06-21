@@ -1,9 +1,5 @@
 import type { Request, Response } from "express";
 
-const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID!;
-const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET!;
-const REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI!;
-
 const SCOPES = [
   "user-read-currently-playing",
   "user-read-playback-state",
@@ -12,16 +8,48 @@ const SCOPES = [
   "user-top-read",
 ].join(" ");
 
+interface SpotifyConfig {
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
+}
+
 interface TokenStore {
   accessToken: string;
   refreshToken: string;
   expiresAt: number;
 }
 
+// Mutable config — seeded from env vars, overridable at runtime
+let config: SpotifyConfig = {
+  clientId: process.env.SPOTIFY_CLIENT_ID || "",
+  clientSecret: process.env.SPOTIFY_CLIENT_SECRET || "",
+  redirectUri: process.env.SPOTIFY_REDIRECT_URI || "",
+};
+
 let tokenStore: TokenStore | null = null;
+
+export function getConfig() {
+  return {
+    clientId: config.clientId,
+    clientSecret: config.clientSecret ? "••••••••" : "",
+    redirectUri: config.redirectUri,
+    hasSecret: !!config.clientSecret,
+  };
+}
+
+export function updateConfig(updates: Partial<SpotifyConfig>) {
+  config = { ...config, ...updates };
+  // Reset auth when credentials change
+  tokenStore = null;
+}
 
 export function isConnected(): boolean {
   return tokenStore !== null;
+}
+
+function isConfigured(): boolean {
+  return !!(config.clientId && config.clientSecret && config.redirectUri);
 }
 
 async function refreshAccessToken(): Promise<boolean> {
@@ -31,7 +59,7 @@ async function refreshAccessToken(): Promise<boolean> {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: "Basic " + Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64"),
+        Authorization: "Basic " + Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64"),
       },
       body: new URLSearchParams({
         grant_type: "refresh_token",
@@ -74,10 +102,13 @@ async function spotifyFetch(path: string, options: RequestInit = {}): Promise<Re
 }
 
 export function handleLogin(_req: Request, res: Response) {
+  if (!isConfigured()) {
+    return res.redirect("/?spotify=not-configured");
+  }
   const params = new URLSearchParams({
-    client_id: CLIENT_ID,
+    client_id: config.clientId,
     response_type: "code",
-    redirect_uri: REDIRECT_URI,
+    redirect_uri: config.redirectUri,
     scope: SCOPES,
     show_dialog: "true",
   });
@@ -86,20 +117,18 @@ export function handleLogin(_req: Request, res: Response) {
 
 export async function handleCallback(req: Request, res: Response) {
   const { code, error } = req.query as { code?: string; error?: string };
-  if (error || !code) {
-    return res.redirect("/?spotify=error");
-  }
+  if (error || !code) return res.redirect("/?spotify=error");
   try {
     const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: "Basic " + Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64"),
+        Authorization: "Basic " + Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64"),
       },
       body: new URLSearchParams({
         grant_type: "authorization_code",
         code,
-        redirect_uri: REDIRECT_URI,
+        redirect_uri: config.redirectUri,
       }),
     });
     if (!tokenRes.ok) return res.redirect("/?spotify=error");
@@ -141,36 +170,21 @@ export async function getNowPlaying(): Promise<object | null> {
 export async function playerAction(action: string): Promise<boolean> {
   let path = "";
   let method = "PUT";
-
   switch (action) {
-    case "play":
-      path = "/me/player/play";
-      method = "PUT";
-      break;
-    case "pause":
-      path = "/me/player/pause";
-      method = "PUT";
-      break;
-    case "next":
-      path = "/me/player/next";
-      method = "POST";
-      break;
-    case "previous":
-      path = "/me/player/previous";
-      method = "POST";
-      break;
-    default:
-      return false;
+    case "play":      path = "/me/player/play";     method = "PUT";  break;
+    case "pause":     path = "/me/player/pause";    method = "PUT";  break;
+    case "next":      path = "/me/player/next";     method = "POST"; break;
+    case "previous":  path = "/me/player/previous"; method = "POST"; break;
+    default: return false;
   }
-
   const res = await spotifyFetch(path, { method });
   return res !== null && (res.ok || res.status === 204);
 }
 
 export async function getStatus() {
-  if (!tokenStore) return { connected: false, nowPlaying: null };
+  if (!tokenStore) return { connected: false, nowPlaying: null, configured: isConfigured() };
   const nowPlaying = await getNowPlaying();
-  return { connected: true, nowPlaying };
+  return { connected: true, nowPlaying, configured: true };
 }
 
 export function disconnect() {
