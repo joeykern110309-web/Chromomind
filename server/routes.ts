@@ -1,11 +1,11 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from "groq-sdk";
 import { storage } from "./storage";
 import { sendMessageSchema, renameConversationSchema } from "@shared/schema";
 import { ZodError } from "zod";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 const SYSTEM_PROMPT = `You are a warm, intelligent, and curious AI assistant. You communicate naturally and humanly — like a knowledgeable friend who genuinely enjoys conversation.
 
@@ -21,11 +21,17 @@ Guidelines:
 
 async function generateTitle(firstMessage: string): Promise<string> {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-    const result = await model.generateContent(
-      `Generate a short, descriptive title (4-6 words max) for a conversation that starts with this message. Return ONLY the title, no quotes or punctuation: "${firstMessage.slice(0, 200)}"`
-    );
-    return result.response.text().trim() || "New Conversation";
+    const response = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [
+        {
+          role: "user",
+          content: `Generate a short, descriptive title (4-6 words max) for a conversation that starts with this message. Return ONLY the title, no quotes or punctuation: "${firstMessage.slice(0, 200)}"`,
+        },
+      ],
+      max_tokens: 20,
+    });
+    return response.choices[0]?.message?.content?.trim() || "New Conversation";
   } catch {
     return firstMessage.slice(0, 50);
   }
@@ -102,19 +108,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.addMessage(convId, { role: "user", content, timestamp: now });
 
       const updatedConversation = await storage.getConversation(convId);
-      const history = (updatedConversation?.messages || []).slice(0, -1).map((m) => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: m.content }],
+      const historyMessages = (updatedConversation?.messages || []).map((m) => ({
+        role: m.role as "user" | "assistant" | "system",
+        content: m.content,
       }));
 
-      const model = genAI.getGenerativeModel({
-        model: "gemini-2.0-flash",
-        systemInstruction: SYSTEM_PROMPT,
+      const response = await groq.chat.completions.create({
+        model: "llama-3.3-70b-versatile",
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          ...historyMessages,
+        ],
+        max_tokens: 8192,
       });
 
-      const chat = model.startChat({ history });
-      const result = await chat.sendMessage(content);
-      const aiContent = result.response.text() || "I'm sorry, I couldn't generate a response.";
+      const aiContent = response.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
 
       const assistantMessage = await storage.addMessage(convId, {
         role: "assistant",
