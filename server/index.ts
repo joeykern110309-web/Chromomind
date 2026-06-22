@@ -1,16 +1,25 @@
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
+import FileStore from "session-file-store";
 import { passport } from "./auth";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+
+const FileStoreSession = FileStore(session);
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Session + Passport (must come before routes)
+// Persistent file-based sessions — survive server restarts
 app.use(
   session({
+    store: new FileStoreSession({
+      path: "./data/sessions",
+      ttl: 60 * 60 * 24 * 30, // 30 days
+      retries: 0,
+      logFn: () => {}, // suppress verbose file-store logs
+    }),
     secret: process.env.SESSION_SECRET || "chromomind-dev-secret",
     resave: false,
     saveUninitialized: false,
@@ -35,12 +44,8 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
+      if (capturedJsonResponse) logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      if (logLine.length > 80) logLine = logLine.slice(0, 79) + "…";
       log(logLine);
     }
   });

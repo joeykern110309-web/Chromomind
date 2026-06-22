@@ -1,10 +1,9 @@
 import { useState, useEffect } from "react";
 import { Zap, AlertCircle, ExternalLink } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 function GoogleIcon() {
   return (
-    <svg viewBox="0 0 24 24" className="w-4 h-4 flex-shrink-0">
+    <svg viewBox="0 0 24 24" className="w-5 h-5 flex-shrink-0">
       <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
       <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
       <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
@@ -23,90 +22,151 @@ export default function Login() {
       .then((d) => setGoogleEnabled(d.googleEnabled))
       .catch(() => setGoogleEnabled(false));
 
-    if (window.location.search.includes("auth_error=1")) {
-      setAuthError(true);
-    }
+    if (window.location.search.includes("auth_error=1")) setAuthError(true);
+
+    // Always show dark theme on login page
+    document.documentElement.classList.add("dark");
   }, []);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-6">
-      <div className="w-full max-w-sm space-y-8">
-        {/* Brand */}
-        <div className="flex flex-col items-center gap-4 text-center">
-          <div className="relative">
-            <div className="absolute inset-0 rounded-2xl bg-primary/20 blur-xl scale-150" />
-            <div className="relative w-16 h-16 rounded-2xl bg-card border border-primary/30 flex items-center justify-center glow">
-              <Zap className="w-8 h-8 text-primary" strokeWidth={1.5} />
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[hsl(240_10%_4%)]">
+
+      {/* Ambient background glows */}
+      <div
+        className="pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 w-[700px] h-[400px] opacity-50"
+        style={{ background: "radial-gradient(ellipse at center, hsl(var(--primary)/0.35) 0%, transparent 65%)", filter: "blur(40px)" }}
+      />
+      <div
+        className="pointer-events-none absolute -bottom-32 -left-32 w-80 h-80 rounded-full opacity-25"
+        style={{ background: "hsl(var(--primary)/0.4)", filter: "blur(80px)" }}
+      />
+      <div
+        className="pointer-events-none absolute -top-32 -right-32 w-64 h-64 rounded-full opacity-20"
+        style={{ background: "hsl(var(--primary)/0.3)", filter: "blur(80px)" }}
+      />
+
+      {/* Subtle grid overlay */}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.03]"
+        style={{
+          backgroundImage: "linear-gradient(hsl(var(--primary)) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--primary)) 1px, transparent 1px)",
+          backgroundSize: "48px 48px",
+        }}
+      />
+
+      {/* Card */}
+      <div className="relative z-10 mx-6 w-full max-w-sm">
+        <div
+          className="rounded-2xl p-8 space-y-8"
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.09)",
+            backdropFilter: "blur(24px)",
+            boxShadow: "0 0 0 1px rgba(0,0,0,0.3), 0 32px 64px rgba(0,0,0,0.4)",
+          }}
+        >
+          {/* Brand */}
+          <div className="flex flex-col items-center gap-5 text-center">
+            <div className="relative">
+              <div
+                className="absolute inset-0 rounded-2xl scale-150 opacity-60"
+                style={{ background: "hsl(var(--primary)/0.3)", filter: "blur(20px)" }}
+              />
+              <div
+                className="relative flex h-16 w-16 items-center justify-center rounded-2xl"
+                style={{
+                  background: "linear-gradient(135deg, hsl(var(--primary)/0.25), hsl(var(--primary)/0.08))",
+                  border: "1px solid hsl(var(--primary)/0.4)",
+                  boxShadow: "0 0 20px hsl(var(--primary)/0.2), inset 0 1px 0 rgba(255,255,255,0.1)",
+                }}
+              >
+                <Zap className="h-8 w-8 text-primary" strokeWidth={1.5} />
+              </div>
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-white">Chromomind</h1>
+              <p className="mt-1.5 text-sm text-white/45">Your AI, your conversations — signed in.</p>
             </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Chromomind</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Sign in to access your conversations</p>
-          </div>
-        </div>
 
-        {/* Auth error */}
-        {authError && (
-          <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3">
-            <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-destructive">Sign-in failed. Please try again.</p>
-          </div>
-        )}
+          {/* Auth error */}
+          {authError && (
+            <div
+              className="flex items-start gap-2.5 rounded-xl p-3"
+              style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.25)" }}
+            >
+              <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-400" />
+              <p className="text-sm text-red-300">Sign-in failed — please try again.</p>
+            </div>
+          )}
 
-        {/* Loading skeleton */}
-        {googleEnabled === null && (
-          <div className="h-10 rounded-lg bg-muted animate-pulse" />
-        )}
+          {/* Loading skeleton */}
+          {googleEnabled === null && (
+            <div className="h-12 rounded-xl animate-pulse" style={{ background: "rgba(255,255,255,0.06)" }} />
+          )}
 
-        {/* Google sign-in */}
-        {googleEnabled === true && (
-          <a href="/api/auth/google" data-testid="link-google-signin">
-            <Button className="w-full gap-3" data-testid="button-google-signin">
-              <GoogleIcon />
-              Continue with Google
-            </Button>
-          </a>
-        )}
+          {/* Google button */}
+          {googleEnabled === true && (
+            <a href="/api/auth/google" data-testid="link-google-signin" className="block">
+              <button
+                data-testid="button-google-signin"
+                className="group relative w-full flex items-center justify-center gap-3 rounded-xl py-3.5 text-sm font-semibold text-white transition-all duration-200 cursor-pointer"
+                style={{
+                  background: "linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06))",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "linear-gradient(135deg, rgba(255,255,255,0.18), rgba(255,255,255,0.10))";
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.25)";
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06))";
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.15)";
+                }}
+              >
+                <GoogleIcon />
+                Continue with Google
+              </button>
+            </a>
+          )}
 
-        {/* Setup instructions when not configured */}
-        {googleEnabled === false && (
-          <div className="space-y-4">
-            <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+          {/* Setup instructions when not configured */}
+          {googleEnabled === false && (
+            <div
+              className="rounded-xl p-4 space-y-3"
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+            >
               <div className="flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                <p className="text-sm font-semibold text-foreground">Google sign-in not configured</p>
+                <AlertCircle className="h-4 w-4 flex-shrink-0 text-white/40" />
+                <p className="text-sm font-semibold text-white/80">Google sign-in not configured</p>
               </div>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Add these secrets in your Replit environment to enable login:
-              </p>
+              <p className="text-xs text-white/40 leading-relaxed">Add these secrets in your Replit environment:</p>
               <div className="space-y-1.5">
                 {["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"].map((key) => (
-                  <code key={key} className="block rounded-md bg-muted px-2.5 py-1.5 text-xs text-foreground font-mono">
+                  <code key={key} className="block rounded-lg px-2.5 py-1.5 text-xs font-mono text-white/70" style={{ background: "rgba(255,255,255,0.06)" }}>
                     {key}
                   </code>
                 ))}
               </div>
-              <div className="pt-1 border-t border-border">
-                <p className="text-xs text-muted-foreground">
-                  Get credentials from{" "}
-                  <a
-                    href="https://console.cloud.google.com/apis/credentials"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-primary inline-flex items-center gap-1 hover:underline"
-                  >
-                    Google Cloud Console
-                    <ExternalLink className="w-3 h-3" />
+              <div className="pt-2 space-y-1.5" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                <p className="text-xs text-white/40">
+                  Get credentials at{" "}
+                  <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-primary inline-flex items-center gap-1 hover:underline">
+                    Google Cloud Console <ExternalLink className="h-3 w-3" />
                   </a>
-                  {" "}→ OAuth 2.0 Client IDs. Set the redirect URI to:
                 </p>
-                <code className="mt-1.5 block rounded-md bg-muted px-2.5 py-1.5 text-xs text-foreground font-mono break-all">
+                <code className="block rounded-lg px-2.5 py-1.5 text-xs font-mono text-white/60 break-all" style={{ background: "rgba(255,255,255,0.06)" }}>
                   {window.location.origin}/api/auth/google/callback
                 </code>
               </div>
             </div>
-          </div>
-        )}
+          )}
+
+          {/* Footer */}
+          <p className="text-center text-xs text-white/25">
+            Your conversations are private and saved to your account.
+          </p>
+        </div>
       </div>
     </div>
   );

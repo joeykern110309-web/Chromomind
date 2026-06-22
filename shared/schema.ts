@@ -7,6 +7,7 @@ export const insertUserSchema = z.object({
   password: z.string().default(""),
   displayName: z.string().optional().nullable(),
   avatar: z.string().optional().nullable(),
+  spotifyRefreshToken: z.string().optional().nullable(),
 });
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = {
@@ -15,6 +16,7 @@ export type User = {
   password: string;
   displayName: string | null;
   avatar: string | null;
+  spotifyRefreshToken: string | null;
 };
 
 // ── Messages / Conversations ─────────────────────────────────────────────────

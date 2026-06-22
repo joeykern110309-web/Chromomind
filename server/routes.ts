@@ -18,6 +18,7 @@ import {
   searchAndPlay,
   getAccessTokenForSdk,
   setSdkDeviceId,
+  restoreFromRefreshToken,
 } from "./spotify";
 
 // ── AI clients ────────────────────────────────────────────────────────────────
@@ -136,7 +137,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     app.get(
       "/api/auth/google/callback",
       passport.authenticate("google", { failureRedirect: "/?auth_error=1" }),
-      (_req, res) => res.redirect("/")
+      async (req, res) => {
+        // Restore this user's saved Spotify session after login
+        const user = req.user as Express.User;
+        if (user?.id) {
+          const savedToken = await storage.getUserSpotifyToken(user.id);
+          if (savedToken) {
+            const ok = await restoreFromRefreshToken(savedToken);
+            console.log(`[Auth] Spotify restore on login for ${user.id}: ${ok ? "OK" : "failed"}`);
+          }
+        }
+        res.redirect("/");
+      }
     );
   } else {
     app.get("/api/auth/google", (_req, res) => {
@@ -162,7 +174,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ── Spotify OAuth ─────────────────────────────────────────────────────────────
   app.get("/api/spotify/login", handleLogin);
-  app.get("/api/spotify/callback", handleCallback);
+  app.get("/api/spotify/callback", async (req, res) => {
+    await handleCallback(req, res, async (refreshToken) => {
+      // Save the Spotify refresh token to the logged-in user's account
+      const user = req.user as Express.User | undefined;
+      if (user?.id) {
+        await storage.updateUserSpotifyToken(user.id, refreshToken);
+        console.log(`[Auth] Spotify token saved to user account: ${user.id}`);
+      }
+    });
+  });
   app.get("/api/spotify/status", async (_req, res) => {
     try { res.json(await getStatus()); }
     catch { res.status(500).json({ error: "Failed to get Spotify status" }); }
@@ -328,13 +349,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else if (status.connected) {
           if (playMatch && !isSkip && !isPrev) {
             const rawQuery = playMatch[1]
-              .replace(/\b(for me|please|now|right now|right now please)\b/gi, "")
+              .replace(/\b(for me|please|now|right now|right now please|mir|bitte|jetzt)\b/gi, "")
               .trim();
-            const byMatch = rawQuery.match(/^(.+?)\s+by\s+(.+)$/i);
-            const query = byMatch
-              ? `track:${byMatch[1].trim()} artist:${byMatch[2].trim()}`
-              : rawQuery;
-            console.log("[Chat] Play intent detected, query:", query);
+            // Multilingual "by/von/par/de/di/av" artist separator
+            const byMatch = rawQuery.match(/^(.+?)\s+(?:by|von|par|de|di|av)\s+(.+)$/i);
+            let query: string;
+            if (byMatch) {
+              query = `track:"${byMatch[1].trim()}" artist:"${byMatch[2].trim()}"`;
+            } else {
+              // For short single/double-word titles, force exact title search to avoid Spotify
+              // returning tangentially related tracks (e.g. "Wind" → wrong result)
+              const wordCount = rawQuery.trim().split(/\s+/).length;
+              query = wordCount <= 3 ? `track:"${rawQuery}"` : rawQuery;
+            }
+            console.log("[Chat] Play intent detected, raw:", rawQuery, "→ query:", query);
             const result = await searchAndPlay(query);
             if (result.success) {
               directResponse = `Playing "${result.trackName}" by ${result.artistName} now!`;

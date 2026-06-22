@@ -10,6 +10,8 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  updateUserSpotifyToken(userId: string, refreshToken: string | null): Promise<void>;
+  getUserSpotifyToken(userId: string): Promise<string | null>;
 
   getConversations(userId: string): Promise<Conversation[]>;
   getConversation(id: string): Promise<Conversation | undefined>;
@@ -33,7 +35,7 @@ export class FileStorage implements IStorage {
       const data = JSON.parse(raw);
       if (data.users) this.users = new Map(Object.entries(data.users) as [string, User][]);
       if (data.conversations) this.conversations = new Map(Object.entries(data.conversations) as [string, any][]);
-    } catch { /* first run — start fresh */ }
+    } catch { /* first run */ }
   }
 
   private persist() {
@@ -64,10 +66,22 @@ export class FileStorage implements IStorage {
       password: insertUser.password ?? "",
       displayName: insertUser.displayName ?? null,
       avatar: insertUser.avatar ?? null,
+      spotifyRefreshToken: (insertUser as any).spotifyRefreshToken ?? null,
     };
     this.users.set(id, user);
     this.persist();
     return user;
+  }
+
+  async updateUserSpotifyToken(userId: string, refreshToken: string | null): Promise<void> {
+    const user = this.users.get(userId);
+    if (!user) return;
+    this.users.set(userId, { ...user, spotifyRefreshToken: refreshToken });
+    this.persist();
+  }
+
+  async getUserSpotifyToken(userId: string): Promise<string | null> {
+    return this.users.get(userId)?.spotifyRefreshToken ?? null;
   }
 
   async getConversations(userId: string): Promise<Conversation[]> {
