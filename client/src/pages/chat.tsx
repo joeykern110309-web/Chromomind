@@ -9,14 +9,16 @@ import ConversationCard from "@/components/ConversationCard";
 import ChatInput from "@/components/ChatInput";
 import TypingIndicator from "@/components/TypingIndicator";
 import EmptyState from "@/components/EmptyState";
-import ThemeToggle from "@/components/ThemeToggle";
+import SettingsDialog from "@/components/SettingsDialog";
 import SpotifyPlayer from "@/components/SpotifyPlayer";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
+import { useLanguage } from "@/lib/i18n";
 import type { Conversation } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Chat() {
+  const { t } = useLanguage();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -35,7 +37,7 @@ export default function Chat() {
       window.history.replaceState({}, "", "/");
       queryClient.invalidateQueries({ queryKey: ["/api/spotify/status"] });
     } else if (s === "error") {
-      toast({ title: "Spotify connection failed", description: "Check your Client ID, Secret and Redirect URI.", variant: "destructive" });
+      toast({ title: "Spotify connection failed", description: "Check your credentials.", variant: "destructive" });
       window.history.replaceState({}, "", "/");
     } else if (s === "not-configured") {
       toast({ title: "Spotify not configured", description: "Enter your credentials first.", variant: "destructive" });
@@ -48,15 +50,6 @@ export default function Chat() {
   const { data: activeConversation } = useQuery<Conversation>({
     queryKey: ["/api/conversations", activeConversationId],
     enabled: !!activeConversationId,
-  });
-
-  const createConversationMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/conversations"),
-    onSuccess: async (res) => {
-      const conv = await res.json();
-      queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
-      setActiveConversationId(conv.id);
-    },
   });
 
   const deleteConversationMutation = useMutation({
@@ -134,9 +127,9 @@ export default function Chat() {
     const d = new Date(conv.updatedAt);
     const diffH = Math.floor((Date.now() - d.getTime()) / 3600000);
     const diffD = Math.floor(diffH / 24);
-    if (diffH < 1) return "Just now";
+    if (diffH < 1) return t("justNow");
     if (diffH < 24) return `${diffH}h ago`;
-    if (diffD === 1) return "Yesterday";
+    if (diffD === 1) return t("yesterday");
     if (diffD < 7) return `${diffD}d ago`;
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
@@ -152,16 +145,18 @@ export default function Chat() {
         )}
         data-testid="sidebar"
       >
-        {/* Sidebar header */}
         <div className="flex-shrink-0 px-4 pt-4 pb-3 border-b border-sidebar-border space-y-3">
+          {/* Branding row */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className="w-7 h-7 rounded-lg bg-primary/10 border border-primary/25 flex items-center justify-center glow-sm">
                 <Zap className="w-3.5 h-3.5 text-primary" strokeWidth={2.5} />
               </div>
-              <span className="text-sm font-bold text-sidebar-foreground tracking-tight">Chromomind</span>
+              <span className="text-sm font-bold text-sidebar-foreground tracking-tight">{t("appName")}</span>
             </div>
+
             <div className="flex items-center gap-0.5">
+              {/* Info button */}
               <Dialog>
                 <DialogTrigger asChild>
                   <Button size="icon" variant="ghost" className="w-7 h-7" data-testid="button-info">
@@ -174,37 +169,34 @@ export default function Chat() {
                       <div className="w-7 h-7 rounded-lg bg-primary/10 border border-primary/25 flex items-center justify-center glow-sm">
                         <Zap className="w-3.5 h-3.5 text-primary" strokeWidth={2.5} />
                       </div>
-                      Chromomind
+                      {t("appName")}
                     </DialogTitle>
                   </DialogHeader>
                   <div className="space-y-4 pt-1">
-                    <p className="text-sm text-muted-foreground leading-relaxed">
-                      An advanced AI chat assistant with Spotify integration, conversation memory, and multilingual support.
-                    </p>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between py-2 border-b border-border">
-                        <span className="text-muted-foreground">Made by</span>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{t("infoDescription")}</p>
+                    <div className="space-y-0 text-sm">
+                      <div className="flex justify-between py-2.5 border-b border-border">
+                        <span className="text-muted-foreground">{t("infoMadeBy")}</span>
                         <span className="font-semibold text-foreground">Joey Kern</span>
                       </div>
-                      <div className="flex justify-between py-2 border-b border-border">
-                        <span className="text-muted-foreground">AI Models</span>
+                      <div className="flex justify-between py-2.5 border-b border-border">
+                        <span className="text-muted-foreground">{t("infoAiModels")}</span>
                         <span className="font-medium text-foreground">Groq · OpenAI</span>
                       </div>
-                      <div className="flex justify-between py-2 border-b border-border">
-                        <span className="text-muted-foreground">Music</span>
+                      <div className="flex justify-between py-2.5 border-b border-border">
+                        <span className="text-muted-foreground">{t("infoMusic")}</span>
                         <span className="font-medium text-foreground">Spotify</span>
                       </div>
-                      <div className="flex justify-between py-2">
-                        <span className="text-muted-foreground">Languages</span>
+                      <div className="flex justify-between py-2.5">
+                        <span className="text-muted-foreground">{t("infoLanguages")}</span>
                         <span className="font-medium text-foreground">EN · DE · FR · ES · IT</span>
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground text-center pt-1">
-                      Built with React, Express &amp; Groq SDK
-                    </p>
+                    <p className="text-xs text-muted-foreground text-center pt-1">{t("infoBuiltWith")}</p>
                   </div>
                 </DialogContent>
               </Dialog>
+
               <Button size="icon" variant="ghost" className="w-7 h-7 lg:hidden" onClick={() => setSidebarOpen(false)} data-testid="button-close-sidebar">
                 <X className="w-3.5 h-3.5" />
               </Button>
@@ -213,14 +205,14 @@ export default function Chat() {
 
           <Button className="w-full justify-start gap-2 text-xs h-8" onClick={() => setActiveConversationId(null)} data-testid="button-new-conversation">
             <Plus className="w-3.5 h-3.5" />
-            New Chat
+            {t("newChat")}
           </Button>
 
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
             <Input
               type="search"
-              placeholder="Search..."
+              placeholder={t("search")}
               className="pl-8 h-7 text-xs bg-sidebar-accent border-sidebar-border"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -238,7 +230,7 @@ export default function Chat() {
           )}
           {!loadingConversations && filteredConversations.length === 0 && (
             <p className="text-xs text-muted-foreground text-center py-10">
-              {searchQuery ? "No matches" : "No chats yet"}
+              {searchQuery ? t("noMatches") : t("noChats")}
             </p>
           )}
           {filteredConversations.map((conv) => (
@@ -263,7 +255,7 @@ export default function Chat() {
                 <ConversationCard
                   id={conv.id}
                   title={conv.title}
-                  preview={conv.messages[conv.messages.length - 1]?.content || "No messages yet"}
+                  preview={conv.messages[conv.messages.length - 1]?.content || t("noMessages")}
                   timestamp={getTimestamp(conv)}
                   isActive={activeConversationId === conv.id}
                   onClick={() => setActiveConversationId(conv.id)}
@@ -280,21 +272,18 @@ export default function Chat() {
 
       {/* ── Main panel ── */}
       <div className="flex-1 flex flex-col min-w-0">
-
-        {/* Header */}
         <header className="sticky top-0 z-10 flex items-center justify-between px-4 py-2.5 bg-background/80 backdrop-blur-xl border-b border-border/50 flex-shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <Button size="icon" variant="ghost" onClick={() => setSidebarOpen((v) => !v)} data-testid="button-toggle-sidebar">
               {sidebarOpen ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeftOpen className="w-4 h-4" />}
             </Button>
             <span className="text-sm font-semibold truncate text-foreground/80">
-              {activeConversation ? activeConversation.title : "New Chat"}
+              {activeConversation ? activeConversation.title : t("newChat")}
             </span>
           </div>
-          <ThemeToggle />
+          <SettingsDialog />
         </header>
 
-        {/* Messages */}
         <main className="flex-1 overflow-y-auto">
           {!activeConversation || activeConversation.messages.length === 0
             ? <EmptyState onPromptClick={handleSend} />
@@ -313,13 +302,8 @@ export default function Chat() {
         <ChatInput onSend={handleSend} disabled={isTyping || sendMessageMutation.isPending} />
       </div>
 
-      {/* Mobile overlay */}
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/70 z-40 lg:hidden backdrop-blur-sm"
-          onClick={() => setSidebarOpen(false)}
-          data-testid="sidebar-overlay"
-        />
+        <div className="fixed inset-0 bg-black/70 z-40 lg:hidden backdrop-blur-sm" onClick={() => setSidebarOpen(false)} data-testid="sidebar-overlay" />
       )}
     </div>
   );

@@ -1,14 +1,15 @@
 import { useState, useRef, useEffect } from "react";
 import { ArrowUp } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useLanguage } from "@/lib/i18n";
 
 interface ChatInputProps {
   onSend: (message: string) => void;
   disabled?: boolean;
-  placeholder?: string;
 }
 
-export default function ChatInput({ onSend, disabled = false, placeholder = "Message..." }: ChatInputProps) {
+export default function ChatInput({ onSend, disabled = false }: ChatInputProps) {
+  const { t } = useLanguage();
   const [message, setMessage] = useState("");
   const [focused, setFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -36,15 +37,10 @@ export default function ChatInput({ onSend, disabled = false, placeholder = "Mes
   return (
     <div className="px-4 pb-6 pt-2 bg-background" data-testid="chat-input-container">
       <div className="max-w-3xl mx-auto">
-        {/* Outer wrapper creates the glowing border effect */}
         <div
           className={cn(
             "relative rounded-2xl transition-all duration-300",
-            focused && canSend
-              ? "glow-pulse-border"
-              : focused
-              ? "glow-ring"
-              : ""
+            focused && canSend ? "glow-pulse-border" : focused ? "glow-ring" : ""
           )}
         >
           <div
@@ -60,14 +56,13 @@ export default function ChatInput({ onSend, disabled = false, placeholder = "Mes
               onKeyDown={handleKeyDown}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
-              placeholder={placeholder}
+              placeholder={t("messagePlaceholder")}
               disabled={disabled}
               rows={1}
               className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none leading-relaxed min-h-[22px] max-h-40 py-0.5"
               style={{ height: "22px" }}
               data-testid="input-message"
             />
-
             <button
               onClick={handleSend}
               disabled={!canSend}
@@ -83,9 +78,8 @@ export default function ChatInput({ onSend, disabled = false, placeholder = "Mes
             </button>
           </div>
         </div>
-
         <p className="text-[11px] text-muted-foreground mt-2 text-center select-none">
-          Enter to send &middot; Shift+Enter for new line
+          {t("enterToSend")}
         </p>
       </div>
     </div>
