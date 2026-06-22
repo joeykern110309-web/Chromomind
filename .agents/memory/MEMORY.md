@@ -1,0 +1,1 @@
+- [AI provider fallback](ai-provider-fallback.md) — chat cascades Groq→OpenAI→Gemini on quota errors; Gemini needs gemini-2.0-flash (1.5 is 404).

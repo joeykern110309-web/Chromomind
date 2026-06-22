@@ -1,6 +1,8 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import Groq from "groq-sdk";
+import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { storage } from "./storage";
 import { sendMessageSchema, renameConversationSchema } from "@shared/schema";
 import { ZodError } from "zod";
@@ -19,6 +21,52 @@ import {
 } from "./spotify";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const gemini = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+
+type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
+
+// Provider fallback chain: Groq → OpenAI → Gemini.
+// Whichever provider has available quota will answer.
+// `light` uses smaller, cheaper models (e.g. for title generation) to conserve tokens.
+async function chatCompletion(messages: ChatMsg[], maxTokens: number, light = false): Promise<string> {
+  // 1. Groq
+  try {
+    const response = await groq.chat.completions.create({
+      model: light ? "llama-3.1-8b-instant" : "llama-3.3-70b-versatile",
+      messages,
+      max_tokens: maxTokens,
+    });
+    return response.choices[0]?.message?.content?.trim() || "";
+  } catch (err: any) {
+    console.error("[AI] Groq failed, trying OpenAI:", err?.status || err?.message);
+  }
+
+  // 2. OpenAI
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages,
+      max_tokens: maxTokens,
+    });
+    return response.choices[0]?.message?.content?.trim() || "";
+  } catch (err: any) {
+    console.error("[AI] OpenAI failed, trying Gemini:", err?.status || err?.message);
+  }
+
+  // 3. Gemini — convert chat messages into a single prompt with system instruction
+  const systemMsg = messages.find((m) => m.role === "system")?.content;
+  const convo = messages
+    .filter((m) => m.role !== "system")
+    .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+    .join("\n");
+  const model = gemini.getGenerativeModel({
+    model: "gemini-2.0-flash",
+    ...(systemMsg ? { systemInstruction: systemMsg } : {}),
+  });
+  const result = await model.generateContent(convo || "Hello");
+  return result.response.text().trim() || "";
+}
 
 const SYSTEM_PROMPT = `You are a warm, intelligent, and curious AI assistant. You communicate naturally and humanly — like a knowledgeable friend who genuinely enjoys conversation.
 
@@ -34,17 +82,17 @@ Guidelines:
 
 async function generateTitle(firstMessage: string): Promise<string> {
   try {
-    const response = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
-      messages: [
+    const title = await chatCompletion(
+      [
         {
           role: "user",
           content: `Generate a short, descriptive title (4-6 words max) for a conversation that starts with this message. Return ONLY the title, no quotes or punctuation: "${firstMessage.slice(0, 200)}"`,
         },
       ],
-      max_tokens: 20,
-    });
-    return response.choices[0]?.message?.content?.trim() || "New Conversation";
+      20,
+      true,
+    );
+    return title || "New Conversation";
   } catch {
     return firstMessage.slice(0, 50);
   }
@@ -252,12 +300,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (directResponse) {
         aiContent = directResponse;
       } else {
-        const response = await groq.chat.completions.create({
-          model: "llama-3.3-70b-versatile",
-          messages: [{ role: "system", content: systemPrompt }, ...historyMessages],
-          max_tokens: 1024,
-        });
-        aiContent = response.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
+        aiContent = await chatCompletion(
+          [{ role: "system", content: systemPrompt }, ...historyMessages],
+          1024,
+        ) || "I'm sorry, I couldn't generate a response.";
       }
 
       const assistantMessage = await storage.addMessage(convId, {
