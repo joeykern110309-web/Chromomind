@@ -114,6 +114,22 @@ export function updateConfig(updates: Partial<SpotifyConfig>) {
   tokenStore = null;
 }
 
+// SDK device_id registered by the browser Web Playback SDK
+let sdkDeviceId: string | null = null;
+
+export function setSdkDeviceId(id: string | null) {
+  sdkDeviceId = id;
+  console.log("[Spotify] SDK device_id set:", id);
+}
+
+export function getSdkDeviceId(): string | null {
+  return sdkDeviceId;
+}
+
+export async function getAccessTokenForSdk(): Promise<string | null> {
+  return getAccessToken();
+}
+
 export function isConnected(): boolean {
   return tokenStore !== null;
 }
@@ -267,15 +283,16 @@ async function ensureActiveDevice(): Promise<string | null> {
   // Transfer playback to the device (needed when Spotify is open but idle)
   await spotifyFetch("/me/player", {
     method: "PUT",
-    body: JSON.stringify({ device_ids: [deviceId], play: false }),
+    body: JSON.stringify({ device_ids: [deviceId], play: true }),
   });
+  // Small delay for Spotify to process the transfer
+  await new Promise(r => setTimeout(r, 800));
   return deviceId;
 }
 
 export async function playerAction(action: string): Promise<boolean> {
   let path = "";
   let method = "PUT";
-  let deviceId: string | null = null;
 
   switch (action) {
     case "play":      path = "/me/player/play";     method = "PUT";  break;
@@ -285,25 +302,15 @@ export async function playerAction(action: string): Promise<boolean> {
     default: return false;
   }
 
-  // Try directly first; if we get 404/403, find a device
-  let res = await spotifyFetch(path, { method });
-  console.log("[Spotify] playerAction", action, "→", res?.status);
+  // Prefer SDK device_id, then fall back to API device discovery
+  const preferredDevice = sdkDeviceId || await getActiveDeviceId();
+  const targetPath = preferredDevice ? `${path}?device_id=${preferredDevice}` : path;
 
-  if (res && (res.status === 404 || res.status === 403)) {
-    // Try to activate a device and retry
-    deviceId = await ensureActiveDevice();
-    if (deviceId) {
-      const pathWithDevice = `${path}?device_id=${deviceId}`;
-      res = await spotifyFetch(pathWithDevice, { method });
-      console.log("[Spotify] playerAction retry with device", deviceId, "→", res?.status);
-    }
-  }
+  const res = await spotifyFetch(targetPath, { method });
+  console.log("[Spotify] playerAction", action, "device:", preferredDevice || "none", "→", res?.status);
 
   if (res && !res.ok && res.status !== 204) {
-    try {
-      const errBody = await res.text();
-      console.error("[Spotify] playerAction error body:", errBody);
-    } catch { /* ignore */ }
+    try { console.error("[Spotify] playerAction error:", await res.text()); } catch { /* ignore */ }
   }
 
   return res !== null && (res.ok || res.status === 204);
@@ -320,26 +327,18 @@ export async function searchAndPlay(query: string): Promise<{ success: boolean; 
     const track = data.tracks?.items?.[0];
     if (!track) return { success: false, error: "No tracks found for: " + query };
 
-    console.log("[Spotify] Found track:", track.name, "by", track.artists[0]?.name, "| uri:", track.uri);
+    console.log("[Spotify] Found track:", track.name, "by", track.artists[0]?.name);
 
-    // Try to play directly; if no active device, find one first
-    let playRes = await spotifyFetch("/me/player/play", {
+    // Prefer SDK device_id, then fall back to API device discovery
+    const preferredDevice = sdkDeviceId || await getActiveDeviceId();
+    console.log("[Spotify] Using device:", preferredDevice || "none (will try without)");
+
+    const playPath = preferredDevice ? `/me/player/play?device_id=${preferredDevice}` : "/me/player/play";
+    const playRes = await spotifyFetch(playPath, {
       method: "PUT",
       body: JSON.stringify({ uris: [track.uri] }),
     });
-    console.log("[Spotify] play attempt 1 →", playRes?.status);
-
-    if (playRes && (playRes.status === 404 || playRes.status === 403)) {
-      // No active device — find one and try again
-      const deviceId = await ensureActiveDevice();
-      if (deviceId) {
-        playRes = await spotifyFetch(`/me/player/play?device_id=${deviceId}`, {
-          method: "PUT",
-          body: JSON.stringify({ uris: [track.uri] }),
-        });
-        console.log("[Spotify] play attempt 2 (device", deviceId, ") →", playRes?.status);
-      }
-    }
+    console.log("[Spotify] play →", playRes?.status);
 
     if (!playRes || (!playRes.ok && playRes.status !== 204)) {
       let errDetail = `HTTP ${playRes?.status}`;
@@ -351,6 +350,11 @@ export async function searchAndPlay(query: string): Promise<{ success: boolean; 
         }
       } catch { /* ignore */ }
       console.error("[Spotify] play failed:", errDetail);
+
+      // Friendly hint based on error type
+      if (playRes?.status === 403) {
+        return { success: false, error: "Spotify Premium is required to control playback via the API." };
+      }
       return { success: false, error: errDetail };
     }
 

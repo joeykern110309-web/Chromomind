@@ -14,6 +14,8 @@ import {
   getConfig,
   updateConfig,
   searchAndPlay,
+  getAccessTokenForSdk,
+  setSdkDeviceId,
 } from "./spotify";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -92,7 +94,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   app.post("/api/spotify/disconnect", (_req, res) => {
     disconnect();
+    setSdkDeviceId(null);
     res.json({ success: true });
+  });
+
+  // Expose access token for the Web Playback SDK (browser-side)
+  app.get("/api/spotify/sdk-token", async (_req, res) => {
+    const token = await getAccessTokenForSdk();
+    if (!token) return res.status(401).json({ error: "Not connected" });
+    res.json({ accessToken: token });
+  });
+
+  // Browser registers its SDK device_id here
+  app.post("/api/spotify/device", (req, res) => {
+    const { deviceId } = req.body as { deviceId: string };
+    if (deviceId) {
+      setSdkDeviceId(deviceId);
+      res.json({ success: true });
+    } else {
+      res.status(400).json({ error: "deviceId required" });
+    }
   });
 
   // ── Conversations ──────────────────────────────────────────────────────────

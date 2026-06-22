@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 import SpotifySettings from "@/components/SpotifySettings";
+import { useSpotifySDK } from "@/hooks/use-spotify-sdk";
 
 interface NowPlaying {
   isPlaying: boolean;
@@ -28,6 +29,10 @@ export default function SpotifyPlayer() {
     queryKey: ["/api/spotify/status"],
     refetchInterval: 5000,
   });
+
+  // Initialize Web Playback SDK when connected — creates a browser device so
+  // the API always has a target even when no external Spotify client is active
+  useSpotifySDK(status?.connected === true);
 
   const { data: nowPlayingData } = useQuery<{ nowPlaying: NowPlaying | null }>({
     queryKey: ["/api/spotify/now-playing"],
