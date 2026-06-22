@@ -233,14 +233,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (status.connected) {
           const msg = content.toLowerCase();
 
-          const playMatch = msg.match(/(?:^|\s)(?:play|put on|queue|listen to|start playing)\s+(.+)/i);
+          // Try multiple play phrasings in order of specificity
+          const PLAY_PATTERNS = [
+            // "play me X", "put on X", "queue X", "start playing X"
+            /(?:^|\s)(?:play\s+me|put\s+on|queue|start\s+playing)\s+(.+)/i,
+            // "can/could/would you play X"
+            /(?:^|\s)(?:can|could|would)\s+you\s+play\s+(.+)/i,
+            // "I'd like to hear X", "I want to hear X", "I'd love to listen to X"
+            /(?:^|\s)i(?:'d)?\s+(?:want|like|love)\s+to\s+(?:hear|listen\s+to|play)\s+(.+)/i,
+            // "I wanna hear X", "I wanna listen to X"
+            /(?:^|\s)i\s+wanna\s+(?:hear|listen\s+to)\s+(.+)/i,
+            // "listen to X"
+            /(?:^|\s)listen\s+to\s+(.+)/i,
+            // plain "play X" (last so more specific patterns take priority)
+            /(?:^|\s)play\s+(.+)/i,
+          ];
+          let playMatch: RegExpMatchArray | null = null;
+          for (const pattern of PLAY_PATTERNS) {
+            playMatch = msg.match(pattern);
+            if (playMatch) break;
+          }
+
           const isSkip   = /\b(skip|next( song| track)?)\b/.test(msg);
           const isPrev   = /\b(previous|prev|go back|last song)\b/.test(msg);
           const isPause  = /\b(pause|stop(?: the music| playing)?)\b/.test(msg) && !playMatch;
           const isResume = /\b(resume|unpause|continue playing|play again)\b/.test(msg);
 
           if (playMatch && !isSkip && !isPrev) {
-            const rawQuery = playMatch[1].replace(/\b(for me|please|now|right now)\b/gi, "").trim();
+            const rawQuery = playMatch[1]
+              .replace(/\b(for me|please|now|right now|right now please)\b/gi, "")
+              .trim();
             const byMatch = rawQuery.match(/^(.+?)\s+by\s+(.+)$/i);
             const query = byMatch
               ? `track:${byMatch[1].trim()} artist:${byMatch[2].trim()}`
