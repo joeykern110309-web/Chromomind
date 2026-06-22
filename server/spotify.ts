@@ -16,6 +16,7 @@ interface SpotifyConfig {
   clientId: string;
   clientSecret: string;
   redirectUri: string;
+  refreshToken?: string;
 }
 
 interface TokenStore {
@@ -55,6 +56,47 @@ function saveConfig(cfg: SpotifyConfig) {
 let config: SpotifyConfig = loadConfig();
 
 let tokenStore: TokenStore | null = null;
+
+// Auto-restore session from saved refresh token on startup
+async function autoRestoreSession() {
+  if (!config.refreshToken) return;
+  try {
+    const res = await fetch("https://accounts.spotify.com/api/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: "Basic " + Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64"),
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: config.refreshToken,
+      }),
+    });
+    if (!res.ok) {
+      console.log("[Spotify] Auto-restore failed (token may be revoked), clearing saved token");
+      config.refreshToken = undefined;
+      saveConfig(config);
+      return;
+    }
+    const data = await res.json();
+    tokenStore = {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token || config.refreshToken,
+      expiresAt: Date.now() + data.expires_in * 1000,
+    };
+    // Persist updated refresh token if Spotify rotated it
+    if (data.refresh_token) {
+      config.refreshToken = data.refresh_token;
+      saveConfig(config);
+    }
+    console.log("[Spotify] Session auto-restored from saved refresh token");
+  } catch (e) {
+    console.error("[Spotify] Auto-restore exception:", e);
+  }
+}
+
+// Kick off auto-restore immediately (non-blocking)
+autoRestoreSession();
 
 export function getConfig() {
   return {
@@ -169,6 +211,10 @@ export async function handleCallback(req: Request, res: Response) {
       refreshToken: data.refresh_token,
       expiresAt: Date.now() + data.expires_in * 1000,
     };
+    // Persist refresh token so session survives server restarts
+    config.refreshToken = data.refresh_token;
+    saveConfig(config);
+    console.log("[Spotify] Refresh token saved to disk for auto-restore");
     res.redirect("/?spotify=connected");
   } catch {
     res.redirect("/?spotify=error");
@@ -198,9 +244,39 @@ export async function getNowPlaying(): Promise<object | null> {
   }
 }
 
+// Get available Spotify devices and return the best one to target
+async function getActiveDeviceId(): Promise<string | null> {
+  const res = await spotifyFetch("/me/player/devices");
+  if (!res || !res.ok) {
+    console.error("[Spotify] /me/player/devices failed:", res?.status);
+    return null;
+  }
+  const data = await res.json();
+  const devices: Array<{ id: string; is_active: boolean; type: string; name: string }> = data.devices || [];
+  console.log("[Spotify] Available devices:", devices.map(d => `${d.name} (${d.type}, active=${d.is_active})`));
+  if (!devices.length) return null;
+  // Prefer the active device; fall back to first available
+  const active = devices.find(d => d.is_active) || devices[0];
+  return active.id;
+}
+
+// Transfer playback to a device if needed
+async function ensureActiveDevice(): Promise<string | null> {
+  const deviceId = await getActiveDeviceId();
+  if (!deviceId) return null;
+  // Transfer playback to the device (needed when Spotify is open but idle)
+  await spotifyFetch("/me/player", {
+    method: "PUT",
+    body: JSON.stringify({ device_ids: [deviceId], play: false }),
+  });
+  return deviceId;
+}
+
 export async function playerAction(action: string): Promise<boolean> {
   let path = "";
   let method = "PUT";
+  let deviceId: string | null = null;
+
   switch (action) {
     case "play":      path = "/me/player/play";     method = "PUT";  break;
     case "pause":     path = "/me/player/pause";    method = "PUT";  break;
@@ -208,25 +284,74 @@ export async function playerAction(action: string): Promise<boolean> {
     case "previous":  path = "/me/player/previous"; method = "POST"; break;
     default: return false;
   }
-  const res = await spotifyFetch(path, { method });
+
+  // Try directly first; if we get 404/403, find a device
+  let res = await spotifyFetch(path, { method });
+  console.log("[Spotify] playerAction", action, "→", res?.status);
+
+  if (res && (res.status === 404 || res.status === 403)) {
+    // Try to activate a device and retry
+    deviceId = await ensureActiveDevice();
+    if (deviceId) {
+      const pathWithDevice = `${path}?device_id=${deviceId}`;
+      res = await spotifyFetch(pathWithDevice, { method });
+      console.log("[Spotify] playerAction retry with device", deviceId, "→", res?.status);
+    }
+  }
+
+  if (res && !res.ok && res.status !== 204) {
+    try {
+      const errBody = await res.text();
+      console.error("[Spotify] playerAction error body:", errBody);
+    } catch { /* ignore */ }
+  }
+
   return res !== null && (res.ok || res.status === 204);
 }
 
 export async function searchAndPlay(query: string): Promise<{ success: boolean; trackName?: string; artistName?: string; error?: string }> {
   try {
     const searchRes = await spotifyFetch(`/search?q=${encodeURIComponent(query)}&type=track&limit=1`);
-    if (!searchRes || !searchRes.ok) return { success: false, error: "Search failed" };
+    if (!searchRes || !searchRes.ok) {
+      console.error("[Spotify] search failed:", searchRes?.status);
+      return { success: false, error: "Search failed" };
+    }
     const data = await searchRes.json();
     const track = data.tracks?.items?.[0];
-    if (!track) return { success: false, error: "No tracks found" };
+    if (!track) return { success: false, error: "No tracks found for: " + query };
 
-    const playRes = await spotifyFetch("/me/player/play", {
+    console.log("[Spotify] Found track:", track.name, "by", track.artists[0]?.name, "| uri:", track.uri);
+
+    // Try to play directly; if no active device, find one first
+    let playRes = await spotifyFetch("/me/player/play", {
       method: "PUT",
       body: JSON.stringify({ uris: [track.uri] }),
     });
+    console.log("[Spotify] play attempt 1 →", playRes?.status);
+
+    if (playRes && (playRes.status === 404 || playRes.status === 403)) {
+      // No active device — find one and try again
+      const deviceId = await ensureActiveDevice();
+      if (deviceId) {
+        playRes = await spotifyFetch(`/me/player/play?device_id=${deviceId}`, {
+          method: "PUT",
+          body: JSON.stringify({ uris: [track.uri] }),
+        });
+        console.log("[Spotify] play attempt 2 (device", deviceId, ") →", playRes?.status);
+      }
+    }
 
     if (!playRes || (!playRes.ok && playRes.status !== 204)) {
-      return { success: false, error: "Playback failed — make sure Spotify is open on a device" };
+      let errDetail = `HTTP ${playRes?.status}`;
+      try {
+        const body = await playRes?.text();
+        if (body) {
+          const parsed = JSON.parse(body);
+          errDetail = parsed?.error?.message || errDetail;
+        }
+      } catch { /* ignore */ }
+      console.error("[Spotify] play failed:", errDetail);
+      return { success: false, error: errDetail };
     }
 
     return {
@@ -235,6 +360,7 @@ export async function searchAndPlay(query: string): Promise<{ success: boolean; 
       artistName: track.artists.map((a: { name: string }) => a.name).join(", "),
     };
   } catch (e) {
+    console.error("[Spotify] searchAndPlay exception:", e);
     return { success: false, error: String(e) };
   }
 }
