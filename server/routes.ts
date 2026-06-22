@@ -20,17 +20,13 @@ import {
 } from "./spotify";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-// Replit AI integration — OpenAI-compatible access through Replit's gateway,
-// billed to credits (no personal API key/quota needed).
-const replitAI = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+// OpenAI fallback using the user's own API key.
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
 
-// Provider fallback chain: Groq → Replit AI integration.
-// If Groq is rate-limited/unavailable, Replit AI answers.
+// Provider fallback chain: Groq → OpenAI.
+// If Groq is rate-limited/unavailable, OpenAI answers.
 // `light` uses a smaller, cheaper model (e.g. for title generation) to conserve tokens.
 async function chatCompletion(messages: ChatMsg[], maxTokens: number, light = false): Promise<string> {
   // 1. Groq
@@ -42,14 +38,14 @@ async function chatCompletion(messages: ChatMsg[], maxTokens: number, light = fa
     });
     return response.choices[0]?.message?.content?.trim() || "";
   } catch (err: any) {
-    console.error("[AI] Groq failed, falling back to Replit AI:", err?.status || err?.message);
+    console.error("[AI] Groq failed, falling back to OpenAI:", err?.status || err?.message);
   }
 
-  // 2. Replit AI integration (gpt-5 models: use max_completion_tokens, no temperature)
-  const response = await replitAI.chat.completions.create({
-    model: light ? "gpt-5-nano" : "gpt-5-mini",
+  // 2. OpenAI (user's own API key)
+  const response = await openai.chat.completions.create({
+    model: light ? "gpt-4o-mini" : "gpt-4o",
     messages,
-    max_completion_tokens: Math.max(maxTokens, 8192),
+    max_tokens: maxTokens,
   });
   return response.choices[0]?.message?.content?.trim() || "";
 }
