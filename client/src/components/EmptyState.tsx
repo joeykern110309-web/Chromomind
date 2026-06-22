@@ -16,13 +16,17 @@ export default function EmptyState({ onPromptClick }: EmptyStateProps) {
   ];
 
   return (
-    <div className="flex flex-col items-center justify-center h-full p-8 select-none" data-testid="empty-state">
+    <div
+      className="flex flex-col items-center justify-center min-h-full px-8 pt-20 pb-10 select-none"
+      data-testid="empty-state"
+    >
       <div className="max-w-lg w-full space-y-10 text-center">
 
         <div className="flex flex-col items-center gap-5">
-          <div className="relative">
+          {/* Icon with decorative ring — extra padding so the ring doesn't clip */}
+          <div className="relative p-4">
             <div className="absolute inset-0 rounded-full bg-primary/20 blur-2xl scale-150 orb-float" />
-            <div className="absolute inset-[-12px] rounded-full border border-dashed border-primary/20 spin-slow" />
+            <div className="absolute inset-0 rounded-full border border-dashed border-primary/20 spin-slow" />
             <div className="relative w-20 h-20 rounded-full bg-card border border-primary/25 flex items-center justify-center glow">
               <Zap className="w-9 h-9 text-primary" strokeWidth={1.5} />
             </div>

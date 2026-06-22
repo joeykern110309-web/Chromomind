@@ -1,10 +1,11 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import Groq from "groq-sdk";
 import OpenAI from "openai";
 import { storage } from "./storage";
 import { sendMessageSchema, renameConversationSchema } from "@shared/schema";
 import { ZodError } from "zod";
+import { passport, GOOGLE_CONFIGURED } from "./auth";
 import {
   handleLogin,
   handleCallback,
@@ -19,7 +20,7 @@ import {
   setSdkDeviceId,
 } from "./spotify";
 
-// Build a list of Groq clients from all available GROQ_API_KEY, GROQ_API_KEY_2, GROQ_API_KEY_3 …
+// ── AI clients ────────────────────────────────────────────────────────────────
 const groqClients: Groq[] = [
   process.env.GROQ_API_KEY,
   process.env.GROQ_API_KEY_2,
@@ -30,7 +31,6 @@ const groqClients: Groq[] = [
   .filter(Boolean)
   .map((key) => new Groq({ apiKey: key as string }));
 
-// Replit-managed AI — OpenAI-compatible fallback when all Groq keys are exhausted.
 const replitAI = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
@@ -38,8 +38,6 @@ const replitAI = new OpenAI({
 
 type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
 
-// Try each Groq key in sequence; if all fail, fall back to Replit AI.
-// `light` uses a smaller model (for title generation) to conserve tokens.
 async function chatCompletion(messages: ChatMsg[], maxTokens: number, light = false): Promise<string> {
   for (let i = 0; i < groqClients.length; i++) {
     try {
@@ -53,8 +51,6 @@ async function chatCompletion(messages: ChatMsg[], maxTokens: number, light = fa
       console.error(`[AI] Groq key ${i + 1} failed (${err?.status || err?.message}), trying next…`);
     }
   }
-
-  // All Groq keys exhausted — fall back to Replit AI
   console.log("[AI] All Groq keys exhausted, using Replit AI");
   const response = await replitAI.chat.completions.create({
     model: "gpt-4o-mini",
@@ -76,14 +72,14 @@ Guidelines:
 - Share your perspective thoughtfully while remaining open to other viewpoints
 - Use examples, analogies, and storytelling to make complex ideas accessible`;
 
-// Detect the language of the user's message and return a language name, or null for English
+// Language detection — returns language name or null for English
 function detectLanguage(text: string): string | null {
   const t = text.toLowerCase();
-  const de = /[äöüß]|\b(ich|du|er|sie|wir|ihr|ist|bin|bist|sind|haben|hat|habe|und|oder|aber|nicht|das|die|der|ein|eine|auch|noch|kein|beim|bitte|danke|hallo|ja|nein|gut|sehr|macht|kannst|können|musst|willst|doch|mal|halt|echt|schon|gerade|jetzt|immer|immer|nichts|alles|weil|wenn|dass|wie|was|wer|wo|warum|spiel|spielen|überspringen|nächste|nächstes|vorherige|anhalten|fortsetzen|musik|lied|song)\b/.test(t);
-  const fr = /\b(je|tu|il|elle|nous|vous|ils|elles|est|sont|et|ou|mais|pas|ne|le|la|les|un|une|des|du|bonjour|merci|oui|non|très|bien|comment|pourquoi|que|qui|où|quoi|jouer|écouter|passer|arrêter)\b/.test(t);
-  const es = /\b(yo|tú|él|ella|nosotros|vosotros|ellos|ellas|es|son|estar|ser|y|o|pero|no|el|la|los|las|un|una|del|que|en|con|por|para|hola|gracias|sí|bueno|bien|cómo|qué|quién|dónde|reproducir|escuchar|parar)\b/.test(t);
-  const pt = /\b(eu|tu|ele|ela|nós|vós|eles|elas|está|são|e|ou|mas|não|o|a|os|as|um|uma|dos|das|que|em|com|por|para|olá|obrigado|sim|não|bom|bem|como|por que|quem|onde|tocar|ouvir|parar)\b/.test(t);
-  const it = /\b(io|tu|lui|lei|noi|voi|loro|è|sono|e|o|ma|non|il|la|i|le|un|una|dei|delle|che|in|con|per|ciao|grazie|sì|no|buono|bene|come|perché|chi|dove|suona|ascolta|ferma)\b/.test(t);
+  const de = /[äöüß]|\b(ich|du|er|sie|wir|ihr|ist|bin|bist|sind|haben|hat|habe|und|oder|aber|nicht|das|die|der|ein|eine|auch|noch|kein|beim|bitte|danke|hallo|ja|nein|gut|sehr|macht|kannst|musst|willst|doch|mal|halt|echt|schon|gerade|jetzt|immer|nichts|alles|weil|wenn|dass|wie|was|wer|wo|warum)\b/.test(t);
+  const fr = /\b(je|tu|il|elle|nous|vous|ils|elles|est|sont|et|ou|mais|pas|ne|le|la|les|un|une|des|du|bonjour|merci|oui|non|très|bien|comment|pourquoi|que|qui|où|quoi)\b/.test(t);
+  const es = /\b(yo|él|ella|nosotros|vosotros|ellos|ellas|son|estar|ser|y|pero|no|el|los|las|un|una|del|que|en|con|por|para|hola|gracias|sí|bueno|bien|cómo|qué|quién|dónde)\b/.test(t);
+  const pt = /\b(eu|tu|ele|ela|nós|vós|eles|elas|está|são|e|ou|mas|não|o|a|os|as|um|uma|dos|das|que|em|com|por|para|olá|obrigado|sim|bom|bem|como|quem|onde)\b/.test(t);
+  const it = /\b(io|lui|lei|noi|voi|loro|è|sono|e|o|ma|non|il|la|i|le|un|una|dei|delle|che|in|con|per|ciao|grazie|sì|no|buono|bene|come|perché|chi|dove)\b/.test(t);
   if (de) return "German";
   if (fr) return "French";
   if (es) return "Spanish";
@@ -92,15 +88,19 @@ function detectLanguage(text: string): string | null {
   return null;
 }
 
+// Priming lines the model gets as a fake "assistant" turn — forces language continuation
+const LANG_PRIMERS: Record<string, string> = {
+  German:     "Verstanden. Ich antworte jetzt ausschließlich auf Deutsch.",
+  French:     "Compris. Je répondrai exclusivement en français.",
+  Spanish:    "Entendido. Responderé exclusivamente en español.",
+  Portuguese: "Entendido. Responderei exclusivamente em português.",
+  Italian:    "Capito. Risponderò esclusivamente in italiano.",
+};
+
 async function generateTitle(firstMessage: string): Promise<string> {
   try {
     const title = await chatCompletion(
-      [
-        {
-          role: "user",
-          content: `Generate a short, descriptive title (4-6 words max) for a conversation that starts with this message. Return ONLY the title, no quotes or punctuation: "${firstMessage.slice(0, 200)}"`,
-        },
-      ],
+      [{ role: "user", content: `Generate a short, descriptive title (4-6 words max) for a conversation that starts with this message. Return ONLY the title, no quotes or punctuation: "${firstMessage.slice(0, 200)}"` }],
       20,
       true,
     );
@@ -110,11 +110,46 @@ async function generateTitle(firstMessage: string): Promise<string> {
   }
 }
 
+// ── Auth middleware ────────────────────────────────────────────────────────────
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  if (req.isAuthenticated && req.isAuthenticated()) return next();
+  res.status(401).json({ error: "Unauthorized" });
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
-  // ── Spotify Config ─────────────────────────────────────────────────────────
-  app.get("/api/spotify/config", (_req, res) => {
-    res.json(getConfig());
+
+  // ── Google Auth ──────────────────────────────────────────────────────────────
+  app.get("/api/auth/config", (_req, res) => {
+    res.json({ googleEnabled: GOOGLE_CONFIGURED });
   });
+
+  app.get("/api/auth/me", (req, res) => {
+    if (!req.isAuthenticated || !req.isAuthenticated()) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const user = req.user as Express.User;
+    res.json({ id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar });
+  });
+
+  if (GOOGLE_CONFIGURED) {
+    app.get("/api/auth/google", passport.authenticate("google", { scope: ["profile", "email"] }));
+    app.get(
+      "/api/auth/google/callback",
+      passport.authenticate("google", { failureRedirect: "/?auth_error=1" }),
+      (_req, res) => res.redirect("/")
+    );
+  } else {
+    app.get("/api/auth/google", (_req, res) => {
+      res.status(503).json({ error: "Google auth not configured" });
+    });
+  }
+
+  app.post("/api/auth/logout", (req: any, res) => {
+    req.logout(() => res.json({ success: true }));
+  });
+
+  // ── Spotify Config ────────────────────────────────────────────────────────────
+  app.get("/api/spotify/config", (_req, res) => res.json(getConfig()));
   app.post("/api/spotify/config", (req, res) => {
     const { clientId, clientSecret, redirectUri } = req.body;
     updateConfig({
@@ -125,87 +160,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ success: true });
   });
 
-  // ── Spotify OAuth ──────────────────────────────────────────────────────────
+  // ── Spotify OAuth ─────────────────────────────────────────────────────────────
   app.get("/api/spotify/login", handleLogin);
   app.get("/api/spotify/callback", handleCallback);
   app.get("/api/spotify/status", async (_req, res) => {
-    try {
-      const status = await getStatus();
-      res.json(status);
-    } catch {
-      res.status(500).json({ error: "Failed to get Spotify status" });
-    }
+    try { res.json(await getStatus()); }
+    catch { res.status(500).json({ error: "Failed to get Spotify status" }); }
   });
   app.get("/api/spotify/now-playing", async (_req, res) => {
-    try {
-      const nowPlaying = await getNowPlaying();
-      res.json({ nowPlaying });
-    } catch {
-      res.status(500).json({ error: "Failed to get now playing" });
-    }
+    try { res.json({ nowPlaying: await getNowPlaying() }); }
+    catch { res.status(500).json({ error: "Failed to get now playing" }); }
   });
   app.post("/api/spotify/player/:action", async (req, res) => {
-    try {
-      const ok = await playerAction(req.params.action);
-      res.json({ success: ok });
-    } catch {
-      res.status(500).json({ error: "Player action failed" });
-    }
+    try { res.json({ success: await playerAction(req.params.action) }); }
+    catch { res.status(500).json({ error: "Player action failed" }); }
   });
   app.post("/api/spotify/disconnect", (_req, res) => {
-    disconnect();
-    setSdkDeviceId(null);
-    res.json({ success: true });
+    disconnect(); setSdkDeviceId(null); res.json({ success: true });
   });
-
-  // Expose access token for the Web Playback SDK (browser-side)
   app.get("/api/spotify/sdk-token", async (_req, res) => {
     const token = await getAccessTokenForSdk();
     if (!token) return res.status(401).json({ error: "Not connected" });
     res.json({ accessToken: token });
   });
-
-  // Browser registers its SDK device_id here
   app.post("/api/spotify/device", (req, res) => {
     const { deviceId } = req.body as { deviceId: string };
-    if (deviceId) {
-      setSdkDeviceId(deviceId);
-      res.json({ success: true });
-    } else {
-      res.status(400).json({ error: "deviceId required" });
-    }
+    if (deviceId) { setSdkDeviceId(deviceId); res.json({ success: true }); }
+    else res.status(400).json({ error: "deviceId required" });
   });
 
-  // ── Conversations ──────────────────────────────────────────────────────────
-  app.get("/api/conversations", async (_req, res) => {
+  // ── Conversations (auth required) ─────────────────────────────────────────────
+  app.get("/api/conversations", requireAuth, async (req, res) => {
     try {
-      const conversations = await storage.getConversations();
+      const userId = (req.user as Express.User).id;
+      const conversations = await storage.getConversations(userId);
       res.json(conversations);
-    } catch {
-      res.status(500).json({ error: "Failed to fetch conversations" });
-    }
+    } catch { res.status(500).json({ error: "Failed to fetch conversations" }); }
   });
 
-  app.get("/api/conversations/:id", async (req, res) => {
+  app.get("/api/conversations/:id", requireAuth, async (req, res) => {
     try {
       const conversation = await storage.getConversation(req.params.id);
       if (!conversation) return res.status(404).json({ error: "Conversation not found" });
       res.json(conversation);
-    } catch {
-      res.status(500).json({ error: "Failed to fetch conversation" });
-    }
+    } catch { res.status(500).json({ error: "Failed to fetch conversation" }); }
   });
 
-  app.post("/api/conversations", async (_req, res) => {
+  app.post("/api/conversations", requireAuth, async (req, res) => {
     try {
-      const conversation = await storage.createConversation("New Conversation");
+      const userId = (req.user as Express.User).id;
+      const conversation = await storage.createConversation("New Conversation", userId);
       res.json(conversation);
-    } catch {
-      res.status(500).json({ error: "Failed to create conversation" });
-    }
+    } catch { res.status(500).json({ error: "Failed to create conversation" }); }
   });
 
-  app.patch("/api/conversations/:id", async (req, res) => {
+  app.patch("/api/conversations/:id", requireAuth, async (req, res) => {
     try {
       const { title } = renameConversationSchema.parse(req.body);
       const updated = await storage.updateConversationTitle(req.params.id, title);
@@ -217,26 +226,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/conversations/:id", async (req, res) => {
+  app.delete("/api/conversations/:id", requireAuth, async (req, res) => {
     try {
       const deleted = await storage.deleteConversation(req.params.id);
       if (!deleted) return res.status(404).json({ error: "Conversation not found" });
       res.json({ success: true });
-    } catch {
-      res.status(500).json({ error: "Failed to delete conversation" });
-    }
+    } catch { res.status(500).json({ error: "Failed to delete conversation" }); }
   });
 
-  // ── Chat ───────────────────────────────────────────────────────────────────
-  app.post("/api/chat", async (req, res) => {
+  // ── Chat (auth required) ──────────────────────────────────────────────────────
+  app.post("/api/chat", requireAuth, async (req, res) => {
     try {
       const { conversationId, content } = sendMessageSchema.parse(req.body);
+      const userId = (req.user as Express.User).id;
 
       let convId = conversationId;
       let conversation;
 
       if (!convId) {
-        conversation = await storage.createConversation("New Conversation");
+        conversation = await storage.createConversation("New Conversation", userId);
         convId = conversation.id;
       } else {
         conversation = await storage.getConversation(convId);
@@ -247,56 +255,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.addMessage(convId, { role: "user", content, timestamp: now });
 
       const updatedConversation = await storage.getConversation(convId);
-      const historyMessages = (updatedConversation?.messages || []).map((m) => ({
+      const historyMessages: ChatMsg[] = (updatedConversation?.messages || []).map((m) => ({
         role: m.role as "user" | "assistant" | "system",
         content: m.content,
       }));
 
-      // ── Language detection — inject explicit instruction per request ──────────
-      const detectedLang = detectLanguage(content);
+      // ── Language detection ─────────────────────────────────────────────────
+      // First check current message, then fall back to recent history
+      let detectedLang = detectLanguage(content);
+      if (!detectedLang && historyMessages.length > 1) {
+        const recentUserMsgs = historyMessages
+          .slice(0, -1) // exclude the current message (last in array)
+          .filter((m) => m.role === "user")
+          .slice(-4)
+          .map((m) => m.content);
+        for (const prev of recentUserMsgs.reverse()) {
+          const lang = detectLanguage(prev);
+          if (lang) { detectedLang = lang; break; }
+        }
+      }
+
       let systemPrompt = detectedLang
-        ? `MANDATORY: You are speaking with someone who writes in ${detectedLang}. You MUST reply ONLY in ${detectedLang}. Do not use English or any other language under any circumstances.\n\n${SYSTEM_PROMPT}`
+        ? `CRITICAL SYSTEM RULE: The user is communicating in ${detectedLang}. You MUST respond ONLY in ${detectedLang}. Using any other language is a violation. Never switch to English.\n\n${SYSTEM_PROMPT}`
         : SYSTEM_PROMPT;
 
-      // ── Detect Spotify intent and handle directly (no AI for music commands) ─
+      // ── Spotify music intent detection ──────────────────────────────────────
       let directResponse: string | null = null;
 
       try {
+        const msg = content.toLowerCase();
+
+        const PLAY_PATTERNS = [
+          /(?:^|\s)(?:play\s+me|put\s+on|queue|start\s+playing)\s+(.+)/i,
+          /(?:^|\s)(?:can|could|would)\s+you\s+play\s+(.+)/i,
+          /(?:^|\s)i(?:'d)?\s+(?:want|like|love)\s+to\s+(?:hear|listen\s+to|play)\s+(.+)/i,
+          /(?:^|\s)i\s+wanna\s+(?:hear|listen\s+to)\s+(.+)/i,
+          /(?:^|\s)listen\s+to\s+(.+)/i,
+          /(?:^|\s)spiel(?:e)?\s+(?:mir\s+)?(.+)/i,
+          /(?:^|\s)leg\s+(.+?)\s+auf(?:\s|$)/i,
+          /(?:^|\s)ich\s+(?:will|möchte|würde\s+gern)\s+(?:gern\s+)?(.+?)\s+hören/i,
+          /(?:^|\s)(?:joue|mets|lance)\s+(?:moi\s+)?(.+)/i,
+          /(?:^|\s)(?:pon|reproduce|toca)\s+(.+)/i,
+          /(?:^|\s)play\s+(.+)/i,
+        ];
+
+        let playMatch: RegExpMatchArray | null = null;
+        for (const pattern of PLAY_PATTERNS) {
+          playMatch = msg.match(pattern);
+          if (playMatch) break;
+        }
+
+        const isSkip   = /\b(skip|next( song| track)?|überspringen|weiter|passer|suivant|siguiente)\b/.test(msg);
+        const isPrev   = /\b(previous|prev|go back|last song|zurück|précédent|anterior)\b/.test(msg);
+        const isPause  = /\b(pause|stop(?: the music| playing)?|pausieren|anhalten|pausa|arrêter)\b/.test(msg) && !playMatch;
+        const isResume = /\b(resume|unpause|continue playing|play again|weiterspielen|fortsetzen|reprendre|reanudar)\b/.test(msg);
+        const isMusicCommand = !!(playMatch || isSkip || isPrev || isPause || isResume);
+
         const status = await getStatus();
-        if (status.connected) {
-          const msg = content.toLowerCase();
 
-          // Try multiple play phrasings in order of specificity (EN + DE + FR + ES)
-          const PLAY_PATTERNS = [
-            /(?:^|\s)(?:play\s+me|put\s+on|queue|start\s+playing)\s+(.+)/i,
-            /(?:^|\s)(?:can|could|would)\s+you\s+play\s+(.+)/i,
-            /(?:^|\s)i(?:'d)?\s+(?:want|like|love)\s+to\s+(?:hear|listen\s+to|play)\s+(.+)/i,
-            /(?:^|\s)i\s+wanna\s+(?:hear|listen\s+to)\s+(.+)/i,
-            /(?:^|\s)listen\s+to\s+(.+)/i,
-            // German: "spiel [mir] X", "spiele X"
-            /(?:^|\s)spiel(?:e)?\s+(?:mir\s+)?(.+)/i,
-            // German: "leg X auf"
-            /(?:^|\s)leg\s+(.+?)\s+auf(?:\s|$)/i,
-            // German: "ich will/möchte X hören"
-            /(?:^|\s)ich\s+(?:will|möchte|würde\s+gern)\s+(?:gern\s+)?(.+?)\s+hören/i,
-            // French: "joue X", "mets X"
-            /(?:^|\s)(?:joue|mets|lance)\s+(?:moi\s+)?(.+)/i,
-            // Spanish: "pon X", "reproduce X"
-            /(?:^|\s)(?:pon|reproduce|toca)\s+(.+)/i,
-            // plain "play X" — last priority
-            /(?:^|\s)play\s+(.+)/i,
-          ];
-          let playMatch: RegExpMatchArray | null = null;
-          for (const pattern of PLAY_PATTERNS) {
-            playMatch = msg.match(pattern);
-            if (playMatch) break;
-          }
+        if (isMusicCommand && !status.connected) {
+          // Spotify not connected — tell user to log in, in their language
+          const notConnectedMsgs: Record<string, string> = {
+            German:     "Um Musik zu steuern, musst du zuerst dein Spotify-Konto verbinden. Klicke auf das Musik-Symbol in der Seitenleiste.",
+            French:     "Pour contrôler la musique, connecte d'abord ton compte Spotify. Clique sur l'icône musique dans la barre latérale.",
+            Spanish:    "Para controlar la música, primero conecta tu cuenta de Spotify. Haz clic en el ícono de música en la barra lateral.",
+            Portuguese: "Para controlar a música, conecta primeiro tua conta do Spotify. Clica no ícone de música na barra lateral.",
+            Italian:    "Per controllare la musica, collega prima il tuo account Spotify. Clicca sull'icona musica nella barra laterale.",
+            English:    "To control music, please connect your Spotify account first — click the music icon in the sidebar.",
+          };
+          directResponse = notConnectedMsgs[detectedLang ?? "English"] ?? notConnectedMsgs["English"];
 
-          const isSkip   = /\b(skip|next( song| track)?|überspringen|nächste[rns]?\s+(?:song|lied|titel|track)|weiter(?:springen)?|passer|suivant|siguiente)\b/.test(msg);
-          const isPrev   = /\b(previous|prev|go back|last song|vorherige[rns]?\s+(?:song|lied|titel|track)|zurück|précédent|anterior)\b/.test(msg);
-          const isPause  = /\b(pause|stop(?: the music| playing)?|pausieren|anhalten|pausa|arrêter)\b/.test(msg) && !playMatch;
-          const isResume = /\b(resume|unpause|continue playing|play again|weiterspielen|fortsetzen|reprendre|reanudar)\b/.test(msg);
-
+        } else if (status.connected) {
           if (playMatch && !isSkip && !isPrev) {
             const rawQuery = playMatch[1]
               .replace(/\b(for me|please|now|right now|right now please)\b/gi, "")
@@ -327,7 +356,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
 
           if (!directResponse) {
-            // Not a music command — inject now-playing context for regular chat
             const nowPlaying = await getNowPlaying();
             if (nowPlaying) {
               const np = nowPlaying as { trackName: string; artistName: string; isPlaying: boolean };
@@ -339,15 +367,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error("[Chat] Spotify block error:", spotifyErr);
       }
 
-      // If it was a music command, skip the AI and return directly
+      // ── Build messages with language priming ──────────────────────────────────
       let aiContent: string;
+
       if (directResponse) {
         aiContent = directResponse;
       } else {
-        aiContent = await chatCompletion(
-          [{ role: "system", content: systemPrompt }, ...historyMessages],
-          1024,
-        ) || "I'm sorry, I couldn't generate a response.";
+        // Inject assistant priming right before the last user message — most reliable way
+        // to force the model to continue in the detected language
+        const msgs: ChatMsg[] = [{ role: "system", content: systemPrompt }, ...historyMessages];
+
+        if (detectedLang && LANG_PRIMERS[detectedLang] && msgs.length >= 2) {
+          const lastMsg = msgs.pop()!; // remove last user message
+          msgs.push({ role: "assistant", content: LANG_PRIMERS[detectedLang] }); // prime
+          msgs.push(lastMsg); // re-add user message after primer
+        }
+
+        aiContent =
+          (await chatCompletion(msgs, 1024)) ||
+          "I'm sorry, I couldn't generate a response.";
       }
 
       const assistantMessage = await storage.addMessage(convId, {
@@ -363,11 +401,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const finalConversation = await storage.getConversation(convId);
 
-      res.json({
-        conversationId: convId,
-        assistantMessage,
-        conversation: finalConversation,
-      });
+      res.json({ conversationId: convId, assistantMessage, conversation: finalConversation });
     } catch (e) {
       if (e instanceof ZodError) return res.status(400).json({ error: e.errors });
       const msg = e instanceof Error ? e.message : String(e);

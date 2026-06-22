@@ -1,12 +1,16 @@
-import { Settings, Moon, Sun, Check } from "lucide-react";
+import { Settings, Moon, Sun, Check, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useLanguage, LANGUAGES } from "@/lib/i18n";
+import { useAuth } from "@/lib/auth";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { queryClient } from "@/lib/queryClient";
 
 export default function SettingsDialog() {
   const { lang, setLang, t } = useLanguage();
+  const { user, logout } = useAuth();
   const [theme, setTheme] = useState<"light" | "dark">("dark");
 
   useEffect(() => {
@@ -22,6 +26,15 @@ export default function SettingsDialog() {
     document.documentElement.classList.toggle("dark", next === "dark");
   };
 
+  const handleLogout = async () => {
+    await logout();
+    queryClient.clear();
+  };
+
+  const initials = user?.displayName
+    ? user.displayName.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
+    : user?.username?.slice(0, 2).toUpperCase() ?? "?";
+
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -36,6 +49,38 @@ export default function SettingsDialog() {
         </DialogHeader>
 
         <div className="space-y-6 pt-2">
+
+          {/* Account */}
+          {user && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">{t("account")}</p>
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+                <div className="flex items-center gap-3 min-w-0">
+                  <Avatar className="w-8 h-8 flex-shrink-0">
+                    <AvatarImage src={user.avatar ?? undefined} alt={user.displayName ?? user.username} />
+                    <AvatarFallback className="text-xs bg-primary/20 text-primary font-semibold">
+                      {initials}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">
+                      {user.displayName ?? user.username}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">{user.username}</p>
+                  </div>
+                </div>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={handleLogout}
+                  data-testid="button-logout"
+                  title="Sign out"
+                >
+                  <LogOut className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          )}
 
           {/* Language */}
           <div className="space-y-2">

@@ -1,21 +1,23 @@
-import { pgTable, text, varchar, timestamp } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const users = pgTable("users", {
-  id: varchar("id").primaryKey(),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+// ── User ─────────────────────────────────────────────────────────────────────
+export const insertUserSchema = z.object({
+  id: z.string().optional(),
+  username: z.string(),
+  password: z.string().default(""),
+  displayName: z.string().optional().nullable(),
+  avatar: z.string().optional().nullable(),
 });
-
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
-});
-
 export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
+export type User = {
+  id: string;
+  username: string;
+  password: string;
+  displayName: string | null;
+  avatar: string | null;
+};
 
+// ── Messages / Conversations ─────────────────────────────────────────────────
 export const messageRoleSchema = z.enum(["user", "assistant", "system"]);
 export type MessageRole = z.infer<typeof messageRoleSchema>;
 
@@ -29,6 +31,7 @@ export type Message = z.infer<typeof messageSchema>;
 
 export const conversationSchema = z.object({
   id: z.string(),
+  userId: z.string().optional(),
   title: z.string(),
   messages: z.array(messageSchema),
   createdAt: z.string(),
