@@ -192,72 +192,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
         content: m.content,
       }));
 
-      // ── Detect Spotify intent directly from message ────────────────────────
+      // ── Detect Spotify intent and handle directly (no AI for music commands) ─
+      let directResponse: string | null = null;
       let systemPrompt = SYSTEM_PROMPT;
-      let spotifyActionNote = "";
 
       try {
         const status = await getStatus();
         if (status.connected) {
           const msg = content.toLowerCase();
 
-          // Detect play intent: "play X", "put on X", "queue X", "listen to X"
-          const playMatch = msg.match(/(?:play|put on|queue|listen to|start playing)\s+(.+)/i);
-          // Detect control intents
-          const isSkip     = /\b(skip|next( song| track)?)\b/.test(msg);
-          const isPrev     = /\b(previous|prev|go back|last song)\b/.test(msg);
-          const isPause    = /\b(pause|stop the music|stop playing)\b/.test(msg) && !/play/.test(msg);
-          const isResume   = /\b(resume|unpause|continue playing|play again)\b/.test(msg);
+          const playMatch = msg.match(/(?:^|\s)(?:play|put on|queue|listen to|start playing)\s+(.+)/i);
+          const isSkip   = /\b(skip|next( song| track)?)\b/.test(msg);
+          const isPrev   = /\b(previous|prev|go back|last song)\b/.test(msg);
+          const isPause  = /\b(pause|stop(?: the music| playing)?)\b/.test(msg) && !playMatch;
+          const isResume = /\b(resume|unpause|continue playing|play again)\b/.test(msg);
 
           if (playMatch && !isSkip && !isPrev) {
             const rawQuery = playMatch[1].replace(/\b(for me|please|now|right now)\b/gi, "").trim();
-            // Parse "song by artist" → Spotify search syntax for precision
             const byMatch = rawQuery.match(/^(.+?)\s+by\s+(.+)$/i);
             const query = byMatch
               ? `track:${byMatch[1].trim()} artist:${byMatch[2].trim()}`
               : rawQuery;
+            console.log("[Chat] Play intent detected, query:", query);
             const result = await searchAndPlay(query);
             if (result.success) {
-              spotifyActionNote = `[Spotify] Now playing "${result.trackName}" by ${result.artistName}.`;
+              directResponse = `Playing "${result.trackName}" by ${result.artistName} now!`;
             } else {
-              spotifyActionNote = `[Spotify] Couldn't play that: ${result.error}`;
+              directResponse = `I couldn't play that — ${result.error}. Make sure Spotify is open and you're connected.`;
             }
           } else if (isSkip) {
             const ok = await playerAction("next");
-            spotifyActionNote = ok ? "[Spotify] Skipped to next track." : "[Spotify] Skip failed — is Spotify open on a device?";
+            directResponse = ok ? "Skipped! Enjoy the next track." : "Couldn't skip — make sure Spotify is active on a device.";
           } else if (isPrev) {
             const ok = await playerAction("previous");
-            spotifyActionNote = ok ? "[Spotify] Went back to previous track." : "[Spotify] Previous failed.";
+            directResponse = ok ? "Went back to the previous track." : "Couldn't go back — make sure Spotify is active.";
           } else if (isPause) {
             const ok = await playerAction("pause");
-            spotifyActionNote = ok ? "[Spotify] Paused." : "[Spotify] Pause failed.";
+            directResponse = ok ? "Paused." : "Couldn't pause — make sure Spotify is active.";
           } else if (isResume) {
             const ok = await playerAction("play");
-            spotifyActionNote = ok ? "[Spotify] Resumed playback." : "[Spotify] Resume failed.";
+            directResponse = ok ? "Resumed!" : "Couldn't resume — make sure Spotify is active.";
           }
 
-          // Always inject now-playing context
-          const nowPlaying = await getNowPlaying();
-          if (nowPlaying) {
-            const np = nowPlaying as { trackName: string; artistName: string; albumName: string; isPlaying: boolean };
-            systemPrompt += `\n\nSpotify: user is ${np.isPlaying ? "listening to" : "paused on"} "${np.trackName}" by ${np.artistName}.`;
-          }
-
-          if (spotifyActionNote) {
-            systemPrompt += `\n\nYou just executed a Spotify action: ${spotifyActionNote}. Tell the user naturally what you did in 1-2 sentences.`;
-          } else {
-            systemPrompt += `\n\nSpotify is connected. You can control music — but you already handled it directly, so just chat normally.`;
+          if (!directResponse) {
+            // Not a music command — inject now-playing context for regular chat
+            const nowPlaying = await getNowPlaying();
+            if (nowPlaying) {
+              const np = nowPlaying as { trackName: string; artistName: string; isPlaying: boolean };
+              systemPrompt += `\n\nThe user is currently ${np.isPlaying ? "listening to" : "paused on"} "${np.trackName}" by ${np.artistName} on Spotify.`;
+            }
           }
         }
-      } catch { /* Spotify not connected */ }
+      } catch (spotifyErr) {
+        console.error("[Chat] Spotify block error:", spotifyErr);
+      }
 
-      const response = await groq.chat.completions.create({
-        model: "llama-3.3-70b-versatile",
-        messages: [{ role: "system", content: systemPrompt }, ...historyMessages],
-        max_tokens: 1024,
-      });
-
-      let aiContent = response.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
+      // If it was a music command, skip the AI and return directly
+      let aiContent: string;
+      if (directResponse) {
+        aiContent = directResponse;
+      } else {
+        const response = await groq.chat.completions.create({
+          model: "llama-3.3-70b-versatile",
+          messages: [{ role: "system", content: systemPrompt }, ...historyMessages],
+          max_tokens: 1024,
+        });
+        aiContent = response.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response.";
+      }
 
       const assistantMessage = await storage.addMessage(convId, {
         role: "assistant",
