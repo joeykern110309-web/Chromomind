@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from "react";
-import { Plus, Search, Check, X, Zap, PanelLeftClose, PanelLeftOpen, Info } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Plus, Search, Check, X, Zap, PanelLeftClose, PanelLeftOpen, Info, Maximize, Minimize } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -25,9 +25,53 @@ export default function Chat() {
   const [isTyping, setIsTyping] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  // ── Fullscreen ──────────────────────────────────────────────────────────────
+  const enterFullscreen = useCallback(() => {
+    const el = document.documentElement;
+    if (el.requestFullscreen) el.requestFullscreen();
+    else if ((el as any).webkitRequestFullscreen) (el as any).webkitRequestFullscreen();
+    localStorage.setItem("chromomind-fullscreen", "1");
+  }, []);
+
+  const exitFullscreen = useCallback(() => {
+    if (document.exitFullscreen) document.exitFullscreen();
+    else if ((document as any).webkitExitFullscreen) (document as any).webkitExitFullscreen();
+    localStorage.removeItem("chromomind-fullscreen");
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    if (isFullscreen) exitFullscreen(); else enterFullscreen();
+  }, [isFullscreen, enterFullscreen, exitFullscreen]);
+
+  useEffect(() => {
+    const onChange = () => {
+      const fs = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
+      setIsFullscreen(fs);
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    document.addEventListener("webkitfullscreenchange", onChange);
+
+    // Auto-enter on first interaction if user had it on before
+    if (localStorage.getItem("chromomind-fullscreen") === "1") {
+      const onFirstInteraction = () => {
+        enterFullscreen();
+        document.removeEventListener("click", onFirstInteraction);
+        document.removeEventListener("keydown", onFirstInteraction);
+      };
+      document.addEventListener("click", onFirstInteraction, { once: true });
+      document.addEventListener("keydown", onFirstInteraction, { once: true });
+    }
+
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange);
+      document.removeEventListener("webkitfullscreenchange", onChange);
+    };
+  }, [enterFullscreen]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -281,7 +325,20 @@ export default function Chat() {
               {activeConversation ? activeConversation.title : t("newChat")}
             </span>
           </div>
-          <SettingsDialog />
+          <div className="flex items-center gap-1">
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={toggleFullscreen}
+              data-testid="button-fullscreen"
+              title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+            >
+              {isFullscreen
+                ? <Minimize className="w-4 h-4" />
+                : <Maximize className="w-4 h-4" />}
+            </Button>
+            <SettingsDialog />
+          </div>
         </header>
 
         <main className="relative flex-1 overflow-y-auto">
