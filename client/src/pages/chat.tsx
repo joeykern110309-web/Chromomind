@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, Search, Check, X, Zap, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Plus, Search, Check, X, Zap, PanelLeftClose, PanelLeftOpen, Info } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -158,11 +159,56 @@ export default function Chat() {
               <div className="w-7 h-7 rounded-lg bg-primary/10 border border-primary/25 flex items-center justify-center glow-sm">
                 <Zap className="w-3.5 h-3.5 text-primary" strokeWidth={2.5} />
               </div>
-              <span className="text-sm font-bold text-sidebar-foreground tracking-tight">AI Chat</span>
+              <span className="text-sm font-bold text-sidebar-foreground tracking-tight">Chromomind</span>
             </div>
-            <Button size="icon" variant="ghost" className="lg:hidden" onClick={() => setSidebarOpen(false)} data-testid="button-close-sidebar">
-              <X className="w-4 h-4" />
-            </Button>
+            <div className="flex items-center gap-0.5">
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button size="icon" variant="ghost" className="w-7 h-7" data-testid="button-info">
+                    <Info className="w-3.5 h-3.5" />
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-sm">
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-primary/10 border border-primary/25 flex items-center justify-center glow-sm">
+                        <Zap className="w-3.5 h-3.5 text-primary" strokeWidth={2.5} />
+                      </div>
+                      Chromomind
+                    </DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4 pt-1">
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      An advanced AI chat assistant with Spotify integration, conversation memory, and multilingual support.
+                    </p>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between py-2 border-b border-border">
+                        <span className="text-muted-foreground">Made by</span>
+                        <span className="font-semibold text-foreground">Joey Kern</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b border-border">
+                        <span className="text-muted-foreground">AI Models</span>
+                        <span className="font-medium text-foreground">Groq · OpenAI</span>
+                      </div>
+                      <div className="flex justify-between py-2 border-b border-border">
+                        <span className="text-muted-foreground">Music</span>
+                        <span className="font-medium text-foreground">Spotify</span>
+                      </div>
+                      <div className="flex justify-between py-2">
+                        <span className="text-muted-foreground">Languages</span>
+                        <span className="font-medium text-foreground">EN · DE · FR · ES · IT</span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground text-center pt-1">
+                      Built with React, Express &amp; Groq SDK
+                    </p>
+                  </div>
+                </DialogContent>
+              </Dialog>
+              <Button size="icon" variant="ghost" className="w-7 h-7 lg:hidden" onClick={() => setSidebarOpen(false)} data-testid="button-close-sidebar">
+                <X className="w-3.5 h-3.5" />
+              </Button>
+            </div>
           </div>
 
           <Button className="w-full justify-start gap-2 text-xs h-8" onClick={() => setActiveConversationId(null)} data-testid="button-new-conversation">
