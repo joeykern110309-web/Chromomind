@@ -284,11 +284,31 @@ export default function Chat() {
           <SettingsDialog />
         </header>
 
-        <main className="flex-1 overflow-y-auto">
+        <main className="relative flex-1 overflow-y-auto">
+          {/* Ambient depth layer — always present */}
+          <div className="pointer-events-none absolute inset-0 overflow-hidden">
+            <div
+              className="absolute -top-20 right-1/4 w-[500px] h-[500px] rounded-full opacity-[0.055]"
+              style={{ background: "hsl(var(--primary))", filter: "blur(90px)" }}
+            />
+            <div
+              className="absolute bottom-1/3 -left-20 w-72 h-72 rounded-full opacity-[0.035]"
+              style={{ background: "hsl(var(--primary))", filter: "blur(70px)" }}
+            />
+            {/* Very faint dot grid */}
+            <div
+              className="absolute inset-0 opacity-[0.018]"
+              style={{
+                backgroundImage: "radial-gradient(hsl(var(--primary)) 1px, transparent 1px)",
+                backgroundSize: "28px 28px",
+              }}
+            />
+          </div>
+
           {!activeConversation || activeConversation.messages.length === 0
             ? <EmptyState onPromptClick={handleSend} />
             : (
-              <div className="max-w-3xl mx-auto px-4 pt-6 pb-2">
+              <div className="relative max-w-3xl mx-auto px-4 pt-8 pb-2">
                 {activeConversation.messages.map((msg) => (
                   <ChatMessage key={msg.id} role={msg.role as "user" | "assistant"} content={msg.content} timestamp={msg.timestamp} />
                 ))}
