@@ -210,7 +210,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const isResume   = /\b(resume|unpause|continue playing|play again)\b/.test(msg);
 
           if (playMatch && !isSkip && !isPrev) {
-            const query = playMatch[1].replace(/\b(for me|please|now|right now)\b/gi, "").trim();
+            const rawQuery = playMatch[1].replace(/\b(for me|please|now|right now)\b/gi, "").trim();
+            // Parse "song by artist" → Spotify search syntax for precision
+            const byMatch = rawQuery.match(/^(.+?)\s+by\s+(.+)$/i);
+            const query = byMatch
+              ? `track:${byMatch[1].trim()} artist:${byMatch[2].trim()}`
+              : rawQuery;
             const result = await searchAndPlay(query);
             if (result.success) {
               spotifyActionNote = `[Spotify] Now playing "${result.trackName}" by ${result.artistName}.`;

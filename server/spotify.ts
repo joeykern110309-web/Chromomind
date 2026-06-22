@@ -3,6 +3,9 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 
 const SCOPES = [
+  "streaming",
+  "user-read-email",
+  "user-read-private",
   "user-read-currently-playing",
   "user-read-playback-state",
   "user-modify-playback-state",
@@ -220,7 +223,11 @@ export async function handleCallback(req: Request, res: Response) {
         redirect_uri: config.redirectUri,
       }),
     });
-    if (!tokenRes.ok) return res.redirect("/?spotify=error");
+    if (!tokenRes.ok) {
+      const errBody = await tokenRes.text().catch(() => "");
+      console.error("[Spotify] Token exchange failed:", tokenRes.status, errBody);
+      return res.redirect("/?spotify=error");
+    }
     const data = await tokenRes.json();
     tokenStore = {
       accessToken: data.access_token,
@@ -351,12 +358,16 @@ export async function searchAndPlay(query: string): Promise<{ success: boolean; 
       } catch { /* ignore */ }
       console.error("[Spotify] play failed:", errDetail);
 
-      // Friendly hint based on error type
       if (playRes?.status === 403) {
         return { success: false, error: "Spotify Premium is required to control playback via the API." };
       }
       return { success: false, error: errDetail };
     }
+
+    // SDK sometimes loads the track paused — nudge it to actually play
+    await new Promise(r => setTimeout(r, 600));
+    const resumePath = preferredDevice ? `/me/player/play?device_id=${preferredDevice}` : "/me/player/play";
+    await spotifyFetch(resumePath, { method: "PUT" });
 
     return {
       success: true,
