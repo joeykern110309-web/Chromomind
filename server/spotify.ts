@@ -320,7 +320,16 @@ export async function playerAction(action: string): Promise<boolean> {
     try { console.error("[Spotify] playerAction error:", await res.text()); } catch { /* ignore */ }
   }
 
-  return res !== null && (res.ok || res.status === 204);
+  const ok = res !== null && (res.ok || res.status === 204);
+
+  // After skip, nudge the player to ensure it actually resumes playing
+  if (ok && (action === "next" || action === "previous")) {
+    await new Promise(r => setTimeout(r, 800));
+    const resumePath = preferredDevice ? `/me/player/play?device_id=${preferredDevice}` : "/me/player/play";
+    await spotifyFetch(resumePath, { method: "PUT" });
+  }
+
+  return ok;
 }
 
 export async function searchAndPlay(query: string): Promise<{ success: boolean; trackName?: string; artistName?: string; error?: string }> {

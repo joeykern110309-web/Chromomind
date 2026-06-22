@@ -28,20 +28,23 @@ export default function ConversationCard({
       className={cn(
         "group relative rounded-md p-3 cursor-pointer transition-all duration-150 hover-elevate active-elevate-2",
         isActive
-          ? "bg-sidebar-accent border-l-4 border-primary pl-2"
+          ? "bg-sidebar-accent glow-sm"
           : "bg-transparent"
       )}
       onClick={onClick}
       data-testid={`conversation-card-${id}`}
     >
-      <div className="flex items-start gap-2">
-        <MessageSquare className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+      {isActive && (
+        <div className="absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-primary glow-sm" />
+      )}
+      <div className="flex items-start gap-2 pl-1">
+        <MessageSquare className={cn("w-4 h-4 mt-0.5 flex-shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
         <div className="flex-1 min-w-0 pr-12">
           <div className="flex items-center justify-between gap-1 mb-0.5">
             <h3
               className={cn(
                 "text-sm font-medium truncate",
-                isActive ? "text-sidebar-accent-foreground" : "text-sidebar-foreground"
+                isActive ? "text-foreground" : "text-sidebar-foreground"
               )}
               data-testid={`conversation-title-${id}`}
             >
@@ -49,15 +52,10 @@ export default function ConversationCard({
             </h3>
           </div>
           <div className="flex items-center justify-between gap-2">
-            <p
-              className="text-xs text-muted-foreground truncate flex-1"
-              data-testid={`conversation-preview-${id}`}
-            >
+            <p className="text-xs text-muted-foreground truncate flex-1" data-testid={`conversation-preview-${id}`}>
               {preview}
             </p>
-            <span className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
-              {timestamp}
-            </span>
+            <span className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">{timestamp}</span>
           </div>
         </div>
       </div>
@@ -68,10 +66,7 @@ export default function ConversationCard({
             size="icon"
             variant="ghost"
             className="w-6 h-6"
-            onClick={(e) => {
-              e.stopPropagation();
-              onRename(e);
-            }}
+            onClick={(e) => { e.stopPropagation(); onRename(e); }}
             data-testid={`button-rename-${id}`}
           >
             <Pencil className="w-3 h-3" />
@@ -81,10 +76,7 @@ export default function ConversationCard({
           size="icon"
           variant="ghost"
           className="w-6 h-6"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
           data-testid={`button-delete-${id}`}
         >
           <Trash2 className="w-3 h-3" />

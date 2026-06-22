@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, Menu, Search, Check, X } from "lucide-react";
+import { Plus, PanelLeftClose, PanelLeftOpen, Search, Check, X, Zap } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,7 +26,6 @@ export default function Chat() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  // Handle Spotify OAuth redirect
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const spotifyStatus = params.get("spotify");
@@ -35,7 +34,7 @@ export default function Chat() {
       window.history.replaceState({}, "", "/");
       queryClient.invalidateQueries({ queryKey: ["/api/spotify/status"] });
     } else if (spotifyStatus === "error") {
-      toast({ title: "Spotify connection failed", description: "Check that your Client ID, Secret and Redirect URI are correct.", variant: "destructive" });
+      toast({ title: "Spotify connection failed", description: "Check your Client ID, Secret and Redirect URI.", variant: "destructive" });
       window.history.replaceState({}, "", "/");
     } else if (spotifyStatus === "not-configured") {
       toast({ title: "Spotify not configured", description: "Click the gear icon and enter your credentials first.", variant: "destructive" });
@@ -89,9 +88,7 @@ export default function Chat() {
       const data = await res.json();
       queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
       queryClient.setQueryData(["/api/conversations", data.conversationId], data.conversation);
-      if (!activeConversationId) {
-        setActiveConversationId(data.conversationId);
-      }
+      if (!activeConversationId) setActiveConversationId(data.conversationId);
       setIsTyping(false);
     },
     onError: () => {
@@ -104,15 +101,8 @@ export default function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activeConversation?.messages, isTyping]);
 
-  const handleNewConversation = () => {
-    setActiveConversationId(null);
-  };
-
   const handleSend = (content: string) => {
-    sendMessageMutation.mutate({
-      conversationId: activeConversationId ?? undefined,
-      content,
-    });
+    sendMessageMutation.mutate({ conversationId: activeConversationId ?? undefined, content });
 
     if (activeConversationId) {
       const optimistic: Conversation = {
@@ -131,10 +121,6 @@ export default function Chat() {
     }
   };
 
-  const handlePromptClick = (prompt: string) => {
-    handleSend(prompt);
-  };
-
   const startEditing = (conv: Conversation, e: React.MouseEvent) => {
     e.stopPropagation();
     setEditingId(conv.id);
@@ -142,11 +128,8 @@ export default function Chat() {
   };
 
   const submitRename = (id: string) => {
-    if (editTitle.trim()) {
-      renameConversationMutation.mutate({ id, title: editTitle.trim() });
-    } else {
-      setEditingId(null);
-    }
+    if (editTitle.trim()) renameConversationMutation.mutate({ id, title: editTitle.trim() });
+    else setEditingId(null);
   };
 
   const filteredConversations = conversations.filter((c) =>
@@ -170,30 +153,40 @@ export default function Chat() {
       {/* Sidebar */}
       <div
         className={cn(
-          "fixed inset-y-0 left-0 z-50 w-80 bg-sidebar border-r border-sidebar-border transform transition-transform duration-200 lg:relative lg:translate-x-0 flex flex-col",
+          "fixed inset-y-0 left-0 z-50 w-72 bg-sidebar border-r border-sidebar-border transform transition-transform duration-200 lg:relative lg:translate-x-0 flex flex-col",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
         data-testid="sidebar"
       >
+        {/* Sidebar header */}
         <div className="p-4 space-y-3 border-b border-sidebar-border flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <span className="text-base font-semibold text-sidebar-foreground">Conversations</span>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center glow-sm">
+                <Zap className="w-3.5 h-3.5 text-primary" />
+              </div>
+              <span className="text-sm font-bold text-sidebar-foreground tracking-tight">AI Chat</span>
+            </div>
             <Button size="icon" variant="ghost" className="lg:hidden" onClick={() => setSidebarOpen(false)} data-testid="button-close-sidebar">
               <X className="w-4 h-4" />
             </Button>
           </div>
 
-          <Button className="w-full justify-start gap-2" onClick={handleNewConversation} data-testid="button-new-conversation">
+          <Button
+            className="w-full justify-start gap-2 text-sm"
+            onClick={() => setActiveConversationId(null)}
+            data-testid="button-new-conversation"
+          >
             <Plus className="w-4 h-4" />
-            New Conversation
+            New Chat
           </Button>
 
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
             <Input
               type="search"
-              placeholder="Search conversations..."
-              className="pl-9 bg-sidebar-accent border-sidebar-border text-sm"
+              placeholder="Search..."
+              className="pl-9 bg-sidebar-accent border-sidebar-border text-sm h-8"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               data-testid="input-search"
@@ -201,18 +194,19 @@ export default function Chat() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+        {/* Conversation list */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
           {loadingConversations && (
-            <div className="space-y-2 p-2">
+            <div className="space-y-1 p-2">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="h-16 rounded-md bg-sidebar-accent animate-pulse" />
+                <div key={i} className="h-14 rounded-md bg-sidebar-accent animate-pulse" />
               ))}
             </div>
           )}
 
           {!loadingConversations && filteredConversations.length === 0 && (
-            <p className="text-xs text-muted-foreground text-center py-8 px-4">
-              {searchQuery ? "No conversations match your search" : "No conversations yet. Start a new one!"}
+            <p className="text-xs text-muted-foreground text-center py-10 px-4">
+              {searchQuery ? "No matches found" : "No conversations yet"}
             </p>
           )}
 
@@ -254,35 +248,50 @@ export default function Chat() {
           ))}
         </div>
 
-        {/* Spotify Player pinned at sidebar bottom */}
         <SpotifyPlayer />
       </div>
 
-      {/* Main */}
+      {/* Main area */}
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="sticky top-0 z-10 flex items-center justify-between px-4 py-3 border-b border-border bg-background/95 backdrop-blur-sm flex-shrink-0">
-          <div className="flex items-center gap-3 min-w-0">
-            <Button size="icon" variant="ghost" className="flex-shrink-0" onClick={() => setSidebarOpen((v) => !v)} data-testid="button-toggle-sidebar">
-              <Menu className="w-5 h-5" />
+        {/* Header */}
+        <header className="sticky top-0 z-10 flex items-center justify-between px-4 py-2.5 border-b border-border bg-background/90 backdrop-blur-md flex-shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="flex-shrink-0"
+              onClick={() => setSidebarOpen((v) => !v)}
+              data-testid="button-toggle-sidebar"
+            >
+              {sidebarOpen
+                ? <PanelLeftClose className="w-5 h-5" />
+                : <PanelLeftOpen className="w-5 h-5" />
+              }
             </Button>
             {activeConversation ? (
-              <h1 className="text-base font-semibold text-foreground truncate">
+              <h1 className="text-sm font-semibold text-foreground truncate">
                 {activeConversation.title}
               </h1>
             ) : (
-              <h1 className="text-base font-semibold text-muted-foreground">New Conversation</h1>
+              <h1 className="text-sm font-semibold text-muted-foreground">New Chat</h1>
             )}
           </div>
           <ThemeToggle />
         </header>
 
+        {/* Messages */}
         <main className="flex-1 overflow-y-auto">
           {!activeConversation || activeConversation.messages.length === 0 ? (
-            <EmptyState onPromptClick={handlePromptClick} />
+            <EmptyState onPromptClick={handleSend} />
           ) : (
-            <div className="max-w-4xl mx-auto p-6">
+            <div className="max-w-3xl mx-auto px-4 py-6">
               {activeConversation.messages.map((msg) => (
-                <ChatMessage key={msg.id} role={msg.role as "user" | "assistant"} content={msg.content} timestamp={msg.timestamp} />
+                <ChatMessage
+                  key={msg.id}
+                  role={msg.role as "user" | "assistant"}
+                  content={msg.content}
+                  timestamp={msg.timestamp}
+                />
               ))}
               {isTyping && <TypingIndicator />}
               <div ref={messagesEndRef} />
@@ -293,14 +302,14 @@ export default function Chat() {
         <ChatInput
           onSend={handleSend}
           disabled={isTyping || sendMessageMutation.isPending}
-          placeholder="Type your message..."
+          placeholder="Message..."
         />
       </div>
 
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          className="fixed inset-0 bg-black/60 z-40 lg:hidden backdrop-blur-sm"
           onClick={() => setSidebarOpen(false)}
           data-testid="sidebar-overlay"
         />

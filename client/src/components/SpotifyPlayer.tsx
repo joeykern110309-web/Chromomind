@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { SkipBack, SkipForward, Play, Pause, Music, LogIn, LogOut } from "lucide-react";
+import { SkipBack, SkipForward, Play, Pause, Music2, LogIn, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
@@ -30,8 +30,6 @@ export default function SpotifyPlayer() {
     refetchInterval: 5000,
   });
 
-  // Initialize Web Playback SDK when connected — creates a browser device so
-  // the API always has a target even when no external Spotify client is active
   useSpotifySDK(status?.connected === true);
 
   const { data: nowPlayingData } = useQuery<{ nowPlaying: NowPlaying | null }>({
@@ -46,7 +44,7 @@ export default function SpotifyPlayer() {
       setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: ["/api/spotify/now-playing"] });
         queryClient.invalidateQueries({ queryKey: ["/api/spotify/status"] });
-      }, 500);
+      }, 1000);
     },
   });
 
@@ -68,10 +66,10 @@ export default function SpotifyPlayer() {
 
   if (!status?.connected) {
     return (
-      <div className="border-t border-sidebar-border p-4">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="w-8 h-8 rounded-full bg-[#1DB954]/20 flex items-center justify-center flex-shrink-0">
-            <Music className="w-4 h-4 text-[#1DB954]" />
+      <div className="border-t border-sidebar-border p-4 space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-[#1DB954]/10 border border-[#1DB954]/20 flex items-center justify-center flex-shrink-0">
+            <Music2 className="w-4 h-4 text-[#1DB954]" />
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-semibold text-sidebar-foreground">Spotify</p>
@@ -80,7 +78,11 @@ export default function SpotifyPlayer() {
           <SpotifySettings />
         </div>
         <a href="/api/spotify/login" data-testid="button-spotify-connect">
-          <Button size="sm" className="w-full gap-2 bg-[#1DB954] hover:bg-[#1DB954] text-black font-semibold">
+          <Button
+            size="sm"
+            className="w-full gap-2 text-xs font-semibold"
+            style={{ background: "#1DB954", color: "#000" }}
+          >
             <LogIn className="w-3 h-3" />
             Connect Spotify
           </Button>
@@ -90,8 +92,8 @@ export default function SpotifyPlayer() {
   }
 
   return (
-    <div className="border-t border-sidebar-border p-3 space-y-2">
-      {/* Track info */}
+    <div className="border-t border-sidebar-border p-3 space-y-3">
+      {/* Track info row */}
       <div className="flex items-center gap-2 min-w-0">
         {np?.albumArt ? (
           <img
@@ -101,8 +103,8 @@ export default function SpotifyPlayer() {
             data-testid="img-album-art"
           />
         ) : (
-          <div className="w-10 h-10 rounded-md bg-sidebar-accent flex items-center justify-center flex-shrink-0">
-            <Music className="w-5 h-5 text-muted-foreground" />
+          <div className="w-10 h-10 rounded-md bg-sidebar-accent border border-sidebar-border flex items-center justify-center flex-shrink-0">
+            <Music2 className="w-5 h-5 text-muted-foreground" />
           </div>
         )}
         <div className="min-w-0 flex-1">
@@ -117,20 +119,20 @@ export default function SpotifyPlayer() {
             </>
           ) : (
             <>
-              <p className="text-xs font-semibold text-sidebar-foreground">Spotify Connected</p>
+              <p className="text-xs font-semibold text-sidebar-foreground">Connected</p>
               <p className="text-xs text-muted-foreground">Nothing playing</p>
             </>
           )}
         </div>
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-0.5 flex-shrink-0">
           <SpotifySettings />
           <Button
             size="icon"
             variant="ghost"
-            className="opacity-60"
+            className="opacity-50"
             onClick={() => disconnectMutation.mutate()}
             data-testid="button-spotify-disconnect"
-            title="Disconnect Spotify"
+            title="Disconnect"
           >
             <LogOut className="w-3 h-3" />
           </Button>
@@ -142,8 +144,8 @@ export default function SpotifyPlayer() {
         <div className="space-y-1">
           <div className="h-1 bg-sidebar-accent rounded-full overflow-hidden">
             <div
-              className="h-full bg-[#1DB954] rounded-full transition-all duration-1000"
-              style={{ width: `${progressPercent}%` }}
+              className="h-full rounded-full transition-all duration-1000"
+              style={{ width: `${progressPercent}%`, background: "#1DB954", boxShadow: "0 0 6px #1DB95488" }}
               data-testid="progress-track"
             />
           </div>
@@ -155,13 +157,14 @@ export default function SpotifyPlayer() {
       )}
 
       {/* Controls */}
-      <div className="flex items-center justify-center gap-1">
+      <div className="flex items-center justify-center gap-2">
         <Button
           size="icon"
           variant="ghost"
           onClick={() => playerMutation.mutate("previous")}
           disabled={playerMutation.isPending}
           data-testid="button-spotify-previous"
+          className="opacity-70"
         >
           <SkipBack className="w-4 h-4" />
         </Button>
@@ -172,9 +175,14 @@ export default function SpotifyPlayer() {
           onClick={() => playerMutation.mutate(np?.isPlaying ? "pause" : "play")}
           disabled={playerMutation.isPending}
           data-testid="button-spotify-playpause"
-          className={cn("w-9 h-9", np?.isPlaying && "text-[#1DB954]")}
+          className={cn(
+            "w-9 h-9 rounded-full border",
+            np?.isPlaying
+              ? "border-primary/40 text-primary glow-sm"
+              : "border-border text-foreground"
+          )}
         >
-          {np?.isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+          {np?.isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
         </Button>
 
         <Button
@@ -183,6 +191,7 @@ export default function SpotifyPlayer() {
           onClick={() => playerMutation.mutate("next")}
           disabled={playerMutation.isPending}
           data-testid="button-spotify-next"
+          className="opacity-70"
         >
           <SkipForward className="w-4 h-4" />
         </Button>

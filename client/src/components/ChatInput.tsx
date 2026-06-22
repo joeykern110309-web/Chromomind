@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Paperclip } from "lucide-react";
+import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 interface ChatInputProps {
@@ -13,15 +12,16 @@ interface ChatInputProps {
 export default function ChatInput({
   onSend,
   disabled = false,
-  placeholder = "Type your message...",
+  placeholder = "Message...",
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
+  const [focused, setFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 144)}px`;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
     }
   }, [message]);
 
@@ -40,52 +40,44 @@ export default function ChatInput({
   };
 
   return (
-    <div
-      className="border-t border-border bg-background/95 backdrop-blur-sm p-4"
-      data-testid="chat-input-container"
-    >
-      <div className="max-w-4xl mx-auto">
-        <div className="flex items-end gap-2">
-          <Button
-            size="icon"
-            variant="ghost"
-            className="mb-1"
-            data-testid="button-attach"
-            onClick={() => console.log("Attach clicked")}
-          >
-            <Paperclip className="w-5 h-5" />
-          </Button>
-
-          <div className="flex-1 relative">
-            <Textarea
-              ref={textareaRef}
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={placeholder}
-              disabled={disabled}
-              className={cn(
-                "min-h-[44px] max-h-36 resize-none bg-muted border-input focus-visible:ring-primary",
-                "text-sm leading-relaxed"
-              )}
-              data-testid="input-message"
-              rows={1}
-            />
-          </div>
+    <div className="px-4 pb-5 pt-3 bg-background" data-testid="chat-input-container">
+      <div className="max-w-3xl mx-auto">
+        <div
+          className={cn(
+            "flex items-end gap-3 rounded-2xl border bg-card px-4 py-3 transition-all duration-200",
+            focused ? "border-primary/50 glow-ring" : "border-border"
+          )}
+        >
+          <textarea
+            ref={textareaRef}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            placeholder={placeholder}
+            disabled={disabled}
+            className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none leading-relaxed min-h-[24px] max-h-40 py-0.5"
+            style={{ height: "24px" }}
+            rows={1}
+            data-testid="input-message"
+          />
 
           <Button
             size="icon"
-            variant="default"
-            className="mb-1 rounded-full w-11 h-11"
             onClick={handleSend}
             disabled={!message.trim() || disabled}
+            className={cn(
+              "rounded-xl flex-shrink-0 transition-all duration-200",
+              message.trim() && !disabled ? "glow-sm" : "opacity-40"
+            )}
             data-testid="button-send"
           >
-            <Send className="w-5 h-5" />
+            <Send className="w-4 h-4" />
           </Button>
         </div>
-        <p className="text-xs text-muted-foreground mt-2 text-center">
-          Press Enter to send, Shift+Enter for new line
+        <p className="text-[11px] text-muted-foreground mt-2 text-center">
+          Enter to send · Shift+Enter for new line
         </p>
       </div>
     </div>
