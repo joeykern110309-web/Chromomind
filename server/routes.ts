@@ -19,8 +19,18 @@ import {
   setSdkDeviceId,
 } from "./spotify";
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-// Replit-managed AI — OpenAI-compatible, no personal API key needed.
+// Build a list of Groq clients from all available GROQ_API_KEY, GROQ_API_KEY_2, GROQ_API_KEY_3 …
+const groqClients: Groq[] = [
+  process.env.GROQ_API_KEY,
+  process.env.GROQ_API_KEY_2,
+  process.env.GROQ_API_KEY_3,
+  process.env.GROQ_API_KEY_4,
+  process.env.GROQ_API_KEY_5,
+]
+  .filter(Boolean)
+  .map((key) => new Groq({ apiKey: key as string }));
+
+// Replit-managed AI — OpenAI-compatible fallback when all Groq keys are exhausted.
 const replitAI = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
@@ -28,24 +38,26 @@ const replitAI = new OpenAI({
 
 type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
 
-// Provider fallback chain: Groq → Replit AI.
+// Try each Groq key in sequence; if all fail, fall back to Replit AI.
 // `light` uses a smaller model (for title generation) to conserve tokens.
 async function chatCompletion(messages: ChatMsg[], maxTokens: number, light = false): Promise<string> {
-  // 1. Groq
-  try {
-    const response = await groq.chat.completions.create({
-      model: light ? "llama-3.1-8b-instant" : "llama-3.3-70b-versatile",
-      messages,
-      max_tokens: maxTokens,
-    });
-    return response.choices[0]?.message?.content?.trim() || "";
-  } catch (err: any) {
-    console.error("[AI] Groq failed, falling back to Replit AI:", err?.status || err?.message);
+  for (let i = 0; i < groqClients.length; i++) {
+    try {
+      const response = await groqClients[i].chat.completions.create({
+        model: light ? "llama-3.1-8b-instant" : "llama-3.3-70b-versatile",
+        messages,
+        max_tokens: maxTokens,
+      });
+      return response.choices[0]?.message?.content?.trim() || "";
+    } catch (err: any) {
+      console.error(`[AI] Groq key ${i + 1} failed (${err?.status || err?.message}), trying next…`);
+    }
   }
 
-  // 2. Replit-managed AI (OpenAI-compatible)
+  // All Groq keys exhausted — fall back to Replit AI
+  console.log("[AI] All Groq keys exhausted, using Replit AI");
   const response = await replitAI.chat.completions.create({
-    model: light ? "gpt-4o-mini" : "gpt-4o-mini",
+    model: "gpt-4o-mini",
     messages,
     max_tokens: maxTokens,
   });
