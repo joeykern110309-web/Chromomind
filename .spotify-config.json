@@ -1,5 +1,6 @@
 {
   "clientId": "02c3ebf6c3634e5da07cf6bbcbe834f2",
   "clientSecret": "f11cdc02a2004b37bfb4f76960ee9414",
-  "redirectUri": "https://ecd900c8-50dd-4c1b-9a06-e86f7304e697-00-hdenc9eunl9i.spock.replit.dev/api/spotify/callback"
+  "redirectUri": "https://ecd900c8-50dd-4c1b-9a06-e86f7304e697-00-hdenc9eunl9i.spock.replit.dev/api/spotify/callback",
+  "refreshToken": "AQDS8feMAkvpM4mfBpuGqGtWymVsjnfy-m69aiwVSKx7RLdGL3xzJ4GxJYidhbDCxT703lpjxRyaFs0c1cIyOpGqc_MvQ5BjquaWfJc85Y98N43EvsS7x18L5ANKj0Uq9dg"
 }

@@ -82,6 +82,13 @@ export function useSpotifySDK(connected: boolean) {
       initPlayer();
     } else {
       window.onSpotifyWebPlaybackSDKReady = initPlayer;
+      // Dynamically inject the SDK script if not already present
+      if (!document.querySelector('script[src*="spotify-player"]')) {
+        const script = document.createElement("script");
+        script.src = "https://sdk.scdn.co/spotify-player.js";
+        script.async = true;
+        document.body.appendChild(script);
+      }
     }
 
     return () => {
