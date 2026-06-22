@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Send } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ArrowUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ChatInputProps {
@@ -9,75 +8,84 @@ interface ChatInputProps {
   placeholder?: string;
 }
 
-export default function ChatInput({
-  onSend,
-  disabled = false,
-  placeholder = "Message...",
-}: ChatInputProps) {
+export default function ChatInput({ onSend, disabled = false, placeholder = "Message..." }: ChatInputProps) {
   const [message, setMessage] = useState("");
   const [focused, setFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
-    }
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [message]);
 
+  const canSend = message.trim() && !disabled;
+
   const handleSend = () => {
-    if (message.trim() && !disabled) {
-      onSend(message.trim());
-      setMessage("");
-    }
+    if (!canSend) return;
+    onSend(message.trim());
+    setMessage("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
   return (
-    <div className="px-4 pb-5 pt-3 bg-background" data-testid="chat-input-container">
+    <div className="px-4 pb-6 pt-2 bg-background" data-testid="chat-input-container">
       <div className="max-w-3xl mx-auto">
+        {/* Outer wrapper creates the glowing border effect */}
         <div
           className={cn(
-            "flex items-end gap-3 rounded-2xl border bg-card px-4 py-3 transition-all duration-200",
-            focused ? "border-primary/50 glow-ring" : "border-border"
+            "relative rounded-2xl transition-all duration-300",
+            focused && canSend
+              ? "glow-pulse-border"
+              : focused
+              ? "glow-ring"
+              : ""
           )}
         >
-          <textarea
-            ref={textareaRef}
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            placeholder={placeholder}
-            disabled={disabled}
-            className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none leading-relaxed min-h-[24px] max-h-40 py-0.5"
-            style={{ height: "24px" }}
-            rows={1}
-            data-testid="input-message"
-          />
-
-          <Button
-            size="icon"
-            onClick={handleSend}
-            disabled={!message.trim() || disabled}
+          <div
             className={cn(
-              "rounded-xl flex-shrink-0 transition-all duration-200",
-              message.trim() && !disabled ? "glow-sm" : "opacity-40"
+              "flex items-end gap-2 rounded-2xl border bg-card/90 backdrop-blur-md px-4 py-3",
+              focused ? "border-primary/40" : "border-border"
             )}
-            data-testid="button-send"
           >
-            <Send className="w-4 h-4" />
-          </Button>
+            <textarea
+              ref={textareaRef}
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              placeholder={placeholder}
+              disabled={disabled}
+              rows={1}
+              className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none leading-relaxed min-h-[22px] max-h-40 py-0.5"
+              style={{ height: "22px" }}
+              data-testid="input-message"
+            />
+
+            <button
+              onClick={handleSend}
+              disabled={!canSend}
+              className={cn(
+                "flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200",
+                canSend
+                  ? "bg-primary text-primary-foreground glow-sm cursor-pointer scale-100 hover:scale-105"
+                  : "bg-muted text-muted-foreground cursor-not-allowed opacity-40 scale-95"
+              )}
+              data-testid="button-send"
+            >
+              <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
+            </button>
+          </div>
         </div>
-        <p className="text-[11px] text-muted-foreground mt-2 text-center">
-          Enter to send · Shift+Enter for new line
+
+        <p className="text-[11px] text-muted-foreground mt-2 text-center select-none">
+          Enter to send &middot; Shift+Enter for new line
         </p>
       </div>
     </div>

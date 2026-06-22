@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Plus, PanelLeftClose, PanelLeftOpen, Search, Check, X, Zap } from "lucide-react";
+import { Plus, Search, Check, X, Zap, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,23 +28,21 @@ export default function Chat() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const spotifyStatus = params.get("spotify");
-    if (spotifyStatus === "connected") {
-      toast({ title: "Spotify connected!", description: "Your Spotify account is now linked." });
+    const s = params.get("spotify");
+    if (s === "connected") {
+      toast({ title: "Spotify connected!", description: "Your account is now linked." });
       window.history.replaceState({}, "", "/");
       queryClient.invalidateQueries({ queryKey: ["/api/spotify/status"] });
-    } else if (spotifyStatus === "error") {
+    } else if (s === "error") {
       toast({ title: "Spotify connection failed", description: "Check your Client ID, Secret and Redirect URI.", variant: "destructive" });
       window.history.replaceState({}, "", "/");
-    } else if (spotifyStatus === "not-configured") {
-      toast({ title: "Spotify not configured", description: "Click the gear icon and enter your credentials first.", variant: "destructive" });
+    } else if (s === "not-configured") {
+      toast({ title: "Spotify not configured", description: "Enter your credentials first.", variant: "destructive" });
       window.history.replaceState({}, "", "/");
     }
   }, []);
 
-  const { data: conversations = [], isLoading: loadingConversations } = useQuery<Conversation[]>({
-    queryKey: ["/api/conversations"],
-  });
+  const { data: conversations = [], isLoading: loadingConversations } = useQuery<Conversation[]>({ queryKey: ["/api/conversations"] });
 
   const { data: activeConversation } = useQuery<Conversation>({
     queryKey: ["/api/conversations", activeConversationId],
@@ -74,15 +72,11 @@ export default function Chat() {
   const renameConversationMutation = useMutation({
     mutationFn: ({ id, title }: { id: string; title: string }) =>
       apiRequest("PATCH", `/api/conversations/${id}`, { title }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
-      setEditingId(null);
-    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/conversations"] }); setEditingId(null); },
   });
 
   const sendMessageMutation = useMutation({
-    mutationFn: (payload: { conversationId?: string; content: string }) =>
-      apiRequest("POST", "/api/chat", payload),
+    mutationFn: (payload: { conversationId?: string; content: string }) => apiRequest("POST", "/api/chat", payload),
     onMutate: () => setIsTyping(true),
     onSuccess: async (res) => {
       const data = await res.json();
@@ -93,7 +87,7 @@ export default function Chat() {
     },
     onError: () => {
       setIsTyping(false);
-      toast({ title: "Error", description: "Failed to send message. Please try again.", variant: "destructive" });
+      toast({ title: "Error", description: "Failed to send message.", variant: "destructive" });
     },
   });
 
@@ -103,7 +97,6 @@ export default function Chat() {
 
   const handleSend = (content: string) => {
     sendMessageMutation.mutate({ conversationId: activeConversationId ?? undefined, content });
-
     if (activeConversationId) {
       const optimistic: Conversation = {
         ...(activeConversation!),
@@ -138,8 +131,7 @@ export default function Chat() {
 
   const getTimestamp = (conv: Conversation) => {
     const d = new Date(conv.updatedAt);
-    const now = new Date();
-    const diffH = Math.floor((now.getTime() - d.getTime()) / 3600000);
+    const diffH = Math.floor((Date.now() - d.getTime()) / 3600000);
     const diffD = Math.floor(diffH / 24);
     if (diffH < 1) return "Just now";
     if (diffH < 24) return `${diffH}h ago`;
@@ -150,20 +142,21 @@ export default function Chat() {
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
-      {/* Sidebar */}
-      <div
+
+      {/* ── Sidebar ── */}
+      <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 w-72 bg-sidebar border-r border-sidebar-border transform transition-transform duration-200 lg:relative lg:translate-x-0 flex flex-col",
+          "fixed inset-y-0 left-0 z-50 w-64 bg-sidebar border-r border-sidebar-border flex flex-col transition-transform duration-200 lg:relative lg:translate-x-0",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
         data-testid="sidebar"
       >
         {/* Sidebar header */}
-        <div className="p-4 space-y-3 border-b border-sidebar-border flex-shrink-0">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center glow-sm">
-                <Zap className="w-3.5 h-3.5 text-primary" />
+        <div className="flex-shrink-0 px-4 pt-4 pb-3 border-b border-sidebar-border space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg bg-primary/10 border border-primary/25 flex items-center justify-center glow-sm">
+                <Zap className="w-3.5 h-3.5 text-primary" strokeWidth={2.5} />
               </div>
               <span className="text-sm font-bold text-sidebar-foreground tracking-tight">AI Chat</span>
             </div>
@@ -172,21 +165,17 @@ export default function Chat() {
             </Button>
           </div>
 
-          <Button
-            className="w-full justify-start gap-2 text-sm"
-            onClick={() => setActiveConversationId(null)}
-            data-testid="button-new-conversation"
-          >
-            <Plus className="w-4 h-4" />
+          <Button className="w-full justify-start gap-2 text-xs h-8" onClick={() => setActiveConversationId(null)} data-testid="button-new-conversation">
+            <Plus className="w-3.5 h-3.5" />
             New Chat
           </Button>
 
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
             <Input
               type="search"
               placeholder="Search..."
-              className="pl-9 bg-sidebar-accent border-sidebar-border text-sm h-8"
+              className="pl-8 h-7 text-xs bg-sidebar-accent border-sidebar-border"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               data-testid="input-search"
@@ -195,40 +184,32 @@ export default function Chat() {
         </div>
 
         {/* Conversation list */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+        <div className="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
           {loadingConversations && (
-            <div className="space-y-1 p-2">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="h-14 rounded-md bg-sidebar-accent animate-pulse" />
-              ))}
+            <div className="space-y-1 p-1">
+              {[1, 2, 3].map((i) => <div key={i} className="h-12 rounded-lg bg-sidebar-accent animate-pulse" />)}
             </div>
           )}
-
           {!loadingConversations && filteredConversations.length === 0 && (
-            <p className="text-xs text-muted-foreground text-center py-10 px-4">
-              {searchQuery ? "No matches found" : "No conversations yet"}
+            <p className="text-xs text-muted-foreground text-center py-10">
+              {searchQuery ? "No matches" : "No chats yet"}
             </p>
           )}
-
           {filteredConversations.map((conv) => (
-            <div key={conv.id} className="group/item relative">
+            <div key={conv.id}>
               {editingId === conv.id ? (
-                <div className="flex items-center gap-1 p-2 rounded-md bg-sidebar-accent">
+                <div className="flex items-center gap-1 p-2 rounded-lg bg-sidebar-accent">
                   <Input
-                    autoFocus
-                    value={editTitle}
+                    autoFocus value={editTitle}
                     onChange={(e) => setEditTitle(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") submitRename(conv.id);
-                      if (e.key === "Escape") setEditingId(null);
-                    }}
-                    className="h-7 text-xs bg-background border-input"
+                    onKeyDown={(e) => { if (e.key === "Enter") submitRename(conv.id); if (e.key === "Escape") setEditingId(null); }}
+                    className="h-6 text-xs bg-background border-input"
                     data-testid={`input-rename-${conv.id}`}
                   />
-                  <Button size="icon" variant="ghost" className="h-7 w-7 flex-shrink-0" onClick={() => submitRename(conv.id)} data-testid={`button-confirm-rename-${conv.id}`}>
+                  <Button size="icon" variant="ghost" className="h-6 w-6 flex-shrink-0" onClick={() => submitRename(conv.id)} data-testid={`button-confirm-rename-${conv.id}`}>
                     <Check className="w-3 h-3" />
                   </Button>
-                  <Button size="icon" variant="ghost" className="h-7 w-7 flex-shrink-0" onClick={() => setEditingId(null)} data-testid={`button-cancel-rename-${conv.id}`}>
+                  <Button size="icon" variant="ghost" className="h-6 w-6 flex-shrink-0" onClick={() => setEditingId(null)} data-testid={`button-cancel-rename-${conv.id}`}>
                     <X className="w-3 h-3" />
                   </Button>
                 </div>
@@ -249,67 +230,47 @@ export default function Chat() {
         </div>
 
         <SpotifyPlayer />
-      </div>
+      </aside>
 
-      {/* Main area */}
+      {/* ── Main panel ── */}
       <div className="flex-1 flex flex-col min-w-0">
+
         {/* Header */}
-        <header className="sticky top-0 z-10 flex items-center justify-between px-4 py-2.5 border-b border-border bg-background/90 backdrop-blur-md flex-shrink-0">
+        <header className="sticky top-0 z-10 flex items-center justify-between px-4 py-2.5 bg-background/80 backdrop-blur-xl border-b border-border/50 flex-shrink-0">
           <div className="flex items-center gap-2 min-w-0">
-            <Button
-              size="icon"
-              variant="ghost"
-              className="flex-shrink-0"
-              onClick={() => setSidebarOpen((v) => !v)}
-              data-testid="button-toggle-sidebar"
-            >
-              {sidebarOpen
-                ? <PanelLeftClose className="w-5 h-5" />
-                : <PanelLeftOpen className="w-5 h-5" />
-              }
+            <Button size="icon" variant="ghost" onClick={() => setSidebarOpen((v) => !v)} data-testid="button-toggle-sidebar">
+              {sidebarOpen ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeftOpen className="w-4 h-4" />}
             </Button>
-            {activeConversation ? (
-              <h1 className="text-sm font-semibold text-foreground truncate">
-                {activeConversation.title}
-              </h1>
-            ) : (
-              <h1 className="text-sm font-semibold text-muted-foreground">New Chat</h1>
-            )}
+            <span className="text-sm font-semibold truncate text-foreground/80">
+              {activeConversation ? activeConversation.title : "New Chat"}
+            </span>
           </div>
           <ThemeToggle />
         </header>
 
         {/* Messages */}
         <main className="flex-1 overflow-y-auto">
-          {!activeConversation || activeConversation.messages.length === 0 ? (
-            <EmptyState onPromptClick={handleSend} />
-          ) : (
-            <div className="max-w-3xl mx-auto px-4 py-6">
-              {activeConversation.messages.map((msg) => (
-                <ChatMessage
-                  key={msg.id}
-                  role={msg.role as "user" | "assistant"}
-                  content={msg.content}
-                  timestamp={msg.timestamp}
-                />
-              ))}
-              {isTyping && <TypingIndicator />}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
+          {!activeConversation || activeConversation.messages.length === 0
+            ? <EmptyState onPromptClick={handleSend} />
+            : (
+              <div className="max-w-3xl mx-auto px-4 pt-6 pb-2">
+                {activeConversation.messages.map((msg) => (
+                  <ChatMessage key={msg.id} role={msg.role as "user" | "assistant"} content={msg.content} timestamp={msg.timestamp} />
+                ))}
+                {isTyping && <TypingIndicator />}
+                <div ref={messagesEndRef} />
+              </div>
+            )
+          }
         </main>
 
-        <ChatInput
-          onSend={handleSend}
-          disabled={isTyping || sendMessageMutation.isPending}
-          placeholder="Message..."
-        />
+        <ChatInput onSend={handleSend} disabled={isTyping || sendMessageMutation.isPending} />
       </div>
 
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/60 z-40 lg:hidden backdrop-blur-sm"
+          className="fixed inset-0 bg-black/70 z-40 lg:hidden backdrop-blur-sm"
           onClick={() => setSidebarOpen(false)}
           data-testid="sidebar-overlay"
         />

@@ -67,7 +67,6 @@ async function chatCompletion(messages: ChatMsg[], maxTokens: number, light = fa
 const SYSTEM_PROMPT = `You are a warm, intelligent, and curious AI assistant. You communicate naturally and humanly — like a knowledgeable friend who genuinely enjoys conversation.
 
 Guidelines:
-- CRITICAL: Always respond in the exact same language the user writes in. If they write in German, reply in German. If French, reply in French. Never switch languages unless asked.
 - Be conversational, warm, and engaging — not robotic or overly formal
 - Show genuine curiosity and personality in your responses
 - Remember the full context of our conversation and refer back to earlier points naturally
@@ -76,6 +75,22 @@ Guidelines:
 - When you don't know something, say so honestly and offer to explore it together
 - Share your perspective thoughtfully while remaining open to other viewpoints
 - Use examples, analogies, and storytelling to make complex ideas accessible`;
+
+// Detect the language of the user's message and return a language name, or null for English
+function detectLanguage(text: string): string | null {
+  const t = text.toLowerCase();
+  const de = /[äöüß]|\b(ich|du|er|sie|wir|ihr|ist|bin|bist|sind|haben|hat|habe|und|oder|aber|nicht|das|die|der|ein|eine|auch|noch|kein|beim|bitte|danke|hallo|ja|nein|gut|sehr|macht|kannst|können|musst|willst|doch|mal|halt|echt|schon|gerade|jetzt|immer|immer|nichts|alles|weil|wenn|dass|wie|was|wer|wo|warum|spiel|spielen|überspringen|nächste|nächstes|vorherige|anhalten|fortsetzen|musik|lied|song)\b/.test(t);
+  const fr = /\b(je|tu|il|elle|nous|vous|ils|elles|est|sont|et|ou|mais|pas|ne|le|la|les|un|une|des|du|bonjour|merci|oui|non|très|bien|comment|pourquoi|que|qui|où|quoi|jouer|écouter|passer|arrêter)\b/.test(t);
+  const es = /\b(yo|tú|él|ella|nosotros|vosotros|ellos|ellas|es|son|estar|ser|y|o|pero|no|el|la|los|las|un|una|del|que|en|con|por|para|hola|gracias|sí|bueno|bien|cómo|qué|quién|dónde|reproducir|escuchar|parar)\b/.test(t);
+  const pt = /\b(eu|tu|ele|ela|nós|vós|eles|elas|está|são|e|ou|mas|não|o|a|os|as|um|uma|dos|das|que|em|com|por|para|olá|obrigado|sim|não|bom|bem|como|por que|quem|onde|tocar|ouvir|parar)\b/.test(t);
+  const it = /\b(io|tu|lui|lei|noi|voi|loro|è|sono|e|o|ma|non|il|la|i|le|un|una|dei|delle|che|in|con|per|ciao|grazie|sì|no|buono|bene|come|perché|chi|dove|suona|ascolta|ferma)\b/.test(t);
+  if (de) return "German";
+  if (fr) return "French";
+  if (es) return "Spanish";
+  if (pt) return "Portuguese";
+  if (it) return "Italian";
+  return null;
+}
 
 async function generateTitle(firstMessage: string): Promise<string> {
   try {
@@ -237,28 +252,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
         content: m.content,
       }));
 
+      // ── Language detection — inject explicit instruction per request ──────────
+      const detectedLang = detectLanguage(content);
+      let systemPrompt = detectedLang
+        ? `MANDATORY: You are speaking with someone who writes in ${detectedLang}. You MUST reply ONLY in ${detectedLang}. Do not use English or any other language under any circumstances.\n\n${SYSTEM_PROMPT}`
+        : SYSTEM_PROMPT;
+
       // ── Detect Spotify intent and handle directly (no AI for music commands) ─
       let directResponse: string | null = null;
-      let systemPrompt = SYSTEM_PROMPT;
 
       try {
         const status = await getStatus();
         if (status.connected) {
           const msg = content.toLowerCase();
 
-          // Try multiple play phrasings in order of specificity
+          // Try multiple play phrasings in order of specificity (EN + DE + FR + ES)
           const PLAY_PATTERNS = [
-            // "play me X", "put on X", "queue X", "start playing X"
             /(?:^|\s)(?:play\s+me|put\s+on|queue|start\s+playing)\s+(.+)/i,
-            // "can/could/would you play X"
             /(?:^|\s)(?:can|could|would)\s+you\s+play\s+(.+)/i,
-            // "I'd like to hear X", "I want to hear X", "I'd love to listen to X"
             /(?:^|\s)i(?:'d)?\s+(?:want|like|love)\s+to\s+(?:hear|listen\s+to|play)\s+(.+)/i,
-            // "I wanna hear X", "I wanna listen to X"
             /(?:^|\s)i\s+wanna\s+(?:hear|listen\s+to)\s+(.+)/i,
-            // "listen to X"
             /(?:^|\s)listen\s+to\s+(.+)/i,
-            // plain "play X" (last so more specific patterns take priority)
+            // German: "spiel [mir] X", "spiele X"
+            /(?:^|\s)spiel(?:e)?\s+(?:mir\s+)?(.+)/i,
+            // German: "leg X auf"
+            /(?:^|\s)leg\s+(.+?)\s+auf(?:\s|$)/i,
+            // German: "ich will/möchte X hören"
+            /(?:^|\s)ich\s+(?:will|möchte|würde\s+gern)\s+(?:gern\s+)?(.+?)\s+hören/i,
+            // French: "joue X", "mets X"
+            /(?:^|\s)(?:joue|mets|lance)\s+(?:moi\s+)?(.+)/i,
+            // Spanish: "pon X", "reproduce X"
+            /(?:^|\s)(?:pon|reproduce|toca)\s+(.+)/i,
+            // plain "play X" — last priority
             /(?:^|\s)play\s+(.+)/i,
           ];
           let playMatch: RegExpMatchArray | null = null;
@@ -267,10 +292,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             if (playMatch) break;
           }
 
-          const isSkip   = /\b(skip|next( song| track)?)\b/.test(msg);
-          const isPrev   = /\b(previous|prev|go back|last song)\b/.test(msg);
-          const isPause  = /\b(pause|stop(?: the music| playing)?)\b/.test(msg) && !playMatch;
-          const isResume = /\b(resume|unpause|continue playing|play again)\b/.test(msg);
+          const isSkip   = /\b(skip|next( song| track)?|überspringen|nächste[rns]?\s+(?:song|lied|titel|track)|weiter(?:springen)?|passer|suivant|siguiente)\b/.test(msg);
+          const isPrev   = /\b(previous|prev|go back|last song|vorherige[rns]?\s+(?:song|lied|titel|track)|zurück|précédent|anterior)\b/.test(msg);
+          const isPause  = /\b(pause|stop(?: the music| playing)?|pausieren|anhalten|pausa|arrêter)\b/.test(msg) && !playMatch;
+          const isResume = /\b(resume|unpause|continue playing|play again|weiterspielen|fortsetzen|reprendre|reanudar)\b/.test(msg);
 
           if (playMatch && !isSkip && !isPrev) {
             const rawQuery = playMatch[1]

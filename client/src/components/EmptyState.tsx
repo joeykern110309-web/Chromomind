@@ -1,75 +1,67 @@
 import { Zap, Globe, Music2, Code2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 interface EmptyStateProps {
   onPromptClick: (prompt: string) => void;
 }
 
-const suggestedPrompts = [
-  {
-    icon: Code2,
-    title: "Explain a concept",
-    prompt: "Can you explain how async/await works in JavaScript?",
-  },
-  {
-    icon: Globe,
-    title: "General chat",
-    prompt: "Tell me an interesting fact about the universe",
-  },
-  {
-    icon: Music2,
-    title: "Play music",
-    prompt: "Play Blinding Lights by The Weeknd",
-  },
-  {
-    icon: Zap,
-    title: "Get advice",
-    prompt: "What are some tips for staying productive during the day?",
-  },
+const prompts = [
+  { icon: Code2,  title: "Explain a concept", prompt: "Can you explain how async/await works in JavaScript?" },
+  { icon: Globe,  title: "General chat",       prompt: "Tell me something fascinating about the universe" },
+  { icon: Music2, title: "Play music",          prompt: "Play Blinding Lights by The Weeknd" },
+  { icon: Zap,    title: "Get advice",          prompt: "What are some tips for staying productive?" },
 ];
 
 export default function EmptyState({ onPromptClick }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center h-full p-8" data-testid="empty-state">
-      <div className="max-w-xl w-full space-y-10 text-center">
-        <div className="space-y-4">
-          <div className="relative mx-auto w-20 h-20">
-            <div className="absolute inset-0 rounded-full bg-primary/10 blur-xl glow-pulse" />
-            <div className="relative w-20 h-20 rounded-full bg-card border border-primary/30 flex items-center justify-center glow-sm">
-              <Zap className="w-9 h-9 text-primary" />
+    <div className="flex flex-col items-center justify-center h-full p-8 select-none" data-testid="empty-state">
+      <div className="max-w-lg w-full space-y-10 text-center">
+
+        {/* Hero icon with layered glows */}
+        <div className="flex flex-col items-center gap-5">
+          <div className="relative">
+            {/* Outer blurred ring */}
+            <div className="absolute inset-0 rounded-full bg-primary/20 blur-2xl scale-150 orb-float" />
+            {/* Spinning dashed ring */}
+            <div className="absolute inset-[-12px] rounded-full border border-dashed border-primary/20 spin-slow" />
+            {/* Icon circle */}
+            <div className="relative w-20 h-20 rounded-full bg-card border border-primary/25 flex items-center justify-center glow">
+              <Zap className="w-9 h-9 text-primary" strokeWidth={1.5} />
             </div>
           </div>
+
           <div>
-            <h1 className="text-3xl font-bold text-foreground text-glow">
+            <h1 className="text-4xl font-bold tracking-tight text-foreground text-glow">
               How can I help?
             </h1>
             <p className="mt-2 text-muted-foreground text-sm">
-              Ask me anything, or pick one of these to get started
+              Ask me anything — or pick a suggestion below
             </p>
           </div>
         </div>
 
+        {/* Prompt cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {suggestedPrompts.map((item, index) => {
+          {prompts.map((item, i) => {
             const Icon = item.icon;
             return (
-              <Button
-                key={index}
-                variant="outline"
-                className="h-auto p-4 flex flex-col items-start gap-2 text-left bg-card border-border hover-elevate active-elevate-2"
+              <button
+                key={i}
                 onClick={() => onPromptClick(item.prompt)}
-                data-testid={`button-prompt-${index}`}
+                className="group relative text-left rounded-xl border border-border bg-card/60 backdrop-blur-sm px-4 py-3.5 hover-elevate active-elevate-2 transition-all duration-200 hover:border-primary/30 cursor-pointer"
+                data-testid={`button-prompt-${i}`}
               >
-                <div className="flex items-center gap-2 w-full">
-                  <div className="w-7 h-7 rounded-md bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
+                {/* Subtle hover glow bg */}
+                <div className="absolute inset-0 rounded-xl bg-primary/0 group-hover:bg-primary/[0.03] transition-colors duration-300" />
+                <div className="relative flex items-start gap-3">
+                  <div className="w-7 h-7 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0 mt-0.5 group-hover:bg-primary/15 transition-colors">
                     <Icon className="w-3.5 h-3.5 text-primary" />
                   </div>
-                  <span className="font-semibold text-sm text-foreground">{item.title}</span>
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">{item.title}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{item.prompt}</p>
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground text-left line-clamp-2 pl-9">
-                  {item.prompt}
-                </p>
-              </Button>
+              </button>
             );
           })}
         </div>
