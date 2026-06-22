@@ -144,8 +144,8 @@ export default function SpotifyPlayer() {
         <div className="space-y-1">
           <div className="h-1 bg-sidebar-accent rounded-full overflow-hidden">
             <div
-              className="h-full rounded-full transition-all duration-1000"
-              style={{ width: `${progressPercent}%`, background: "#1DB954", boxShadow: "0 0 6px #1DB95488" }}
+              className="h-full rounded-full transition-all duration-1000 bg-primary glow-sm"
+              style={{ width: `${progressPercent}%` }}
               data-testid="progress-track"
             />
           </div>
