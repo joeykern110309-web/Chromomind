@@ -214,15 +214,14 @@ async function getAccessToken(): Promise<string | null> {
 async function spotifyFetch(path: string, options: RequestInit = {}): Promise<Response | null> {
   const token = await getAccessToken();
   if (!token) return null;
-  const method = (options.method || "GET").toUpperCase();
-  const url = `https://api.spotify.com/v1${path}`;
-  const headers: HeadersInit = { Authorization: `Bearer ${token}` };
-  if (options.body !== undefined) {
-    (headers as Record<string,string>)["Content-Type"] = "application/json";
-  }
-  const init: RequestInit = { method, headers };
-  if (options.body !== undefined) init.body = options.body;
-  return fetch(url, init);
+  return fetch(`https://api.spotify.com/v1${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...(options.headers as Record<string, string> || {}),
+    },
+  });
 }
 
 export function handleLogin(_req: Request, res: ExpressResponse) {
