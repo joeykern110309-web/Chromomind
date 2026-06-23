@@ -1,5 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
+import { randomUUID } from "crypto";
 import Groq from "groq-sdk";
 import OpenAI from "openai";
 import { storage } from "./storage";
@@ -34,6 +35,14 @@ import {
 function spotifyCard(data: object, text: string): string {
   return `SPOTIFY_CARD:${JSON.stringify(data)}\n${text}`;
 }
+
+// ── Broadcast store (in-memory, all connected clients poll this) ───────────────
+interface Broadcast {
+  id: string;
+  message: string;
+  timestamp: string;
+}
+let activeBroadcast: Broadcast | null = null;
 
 // ── AI clients ────────────────────────────────────────────────────────────────
 const groqClients: Groq[] = [
@@ -140,6 +149,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const OWNER_EMAIL = "joeykern11.03.09@gmail.com";
   const OWNER_GOOGLE_ID = "google_108577457563246748278";
+
+  const requireOwner = (req: Request, res: Response, next: NextFunction) => {
+    if (!req.isAuthenticated?.()) return res.status(401).json({ error: "Unauthorized" });
+    const u = req.user as Express.User;
+    if (u.id !== OWNER_GOOGLE_ID && (u.username?.toLowerCase() ?? "") !== OWNER_EMAIL)
+      return res.status(403).json({ error: "Forbidden" });
+    next();
+  };
+
+  // ── Admin: broadcast ────────────────────────────────────────────────────────
+  app.get("/api/admin/broadcast", (_req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.json({ broadcast: activeBroadcast });
+  });
+
+  app.post("/api/admin/broadcast", requireOwner, (req, res) => {
+    const { message } = req.body as { message?: string };
+    if (!message?.trim()) {
+      activeBroadcast = null;
+    } else {
+      activeBroadcast = { id: randomUUID(), message: message.trim(), timestamp: new Date().toISOString() };
+      console.log(`[Admin] Broadcast set: "${activeBroadcast.message}"`);
+    }
+    res.json({ success: true, broadcast: activeBroadcast });
+  });
+
+  app.delete("/api/admin/broadcast", requireOwner, (_req, res) => {
+    activeBroadcast = null;
+    res.json({ success: true });
+  });
+
+  // ── Admin: stats ────────────────────────────────────────────────────────────
+  app.get("/api/admin/stats", requireOwner, async (_req, res) => {
+    res.set("Cache-Control", "no-store");
+    const users = await storage.getAllUsers();
+    const convCounts = await storage.getConversationCountByUser();
+    res.json({
+      userCount: users.length,
+      users: users.map(u => ({
+        id: u.id,
+        username: u.username,
+        displayName: u.displayName,
+        avatar: u.avatar,
+        conversationCount: convCounts[u.id] ?? 0,
+        hasSpotify: !!u.spotifyRefreshToken,
+      })),
+    });
+  });
 
   app.get("/api/auth/me", (req, res) => {
     res.set("Cache-Control", "no-store");

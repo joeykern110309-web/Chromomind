@@ -12,6 +12,7 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   updateUserSpotifyToken(userId: string, refreshToken: string | null): Promise<void>;
   getUserSpotifyToken(userId: string): Promise<string | null>;
+  getAllUsers(): Promise<User[]>;
 
   getConversations(userId: string): Promise<Conversation[]>;
   getConversation(id: string): Promise<Conversation | undefined>;
@@ -19,6 +20,7 @@ export interface IStorage {
   updateConversationTitle(id: string, title: string): Promise<Conversation | undefined>;
   addMessage(conversationId: string, message: Omit<Message, "id">): Promise<Message>;
   deleteConversation(id: string): Promise<boolean>;
+  getConversationCountByUser(): Promise<Record<string, number>>;
 }
 
 export class FileStorage implements IStorage {
@@ -126,6 +128,19 @@ export class FileStorage implements IStorage {
     const deleted = this.conversations.delete(id);
     if (deleted) this.persist();
     return deleted;
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    return Array.from(this.users.values());
+  }
+
+  async getConversationCountByUser(): Promise<Record<string, number>> {
+    const counts: Record<string, number> = {};
+    for (const conv of this.conversations.values()) {
+      const uid = (conv as any).userId;
+      if (uid) counts[uid] = (counts[uid] ?? 0) + 1;
+    }
+    return counts;
   }
 }
 

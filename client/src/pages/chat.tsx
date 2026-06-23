@@ -11,6 +11,8 @@ import TypingIndicator from "@/components/TypingIndicator";
 import EmptyState from "@/components/EmptyState";
 import SettingsDialog from "@/components/SettingsDialog";
 import SpotifyPlayer from "@/components/SpotifyPlayer";
+import BroadcastReceiver from "@/components/BroadcastReceiver";
+import DevPanel from "@/components/DevPanel";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import { useLanguage } from "@/lib/i18n";
@@ -403,6 +405,9 @@ export default function Chat() {
       {sidebarOpen && (
         <div className="fixed inset-0 bg-black/70 z-40 lg:hidden backdrop-blur-sm" onClick={() => setSidebarOpen(false)} data-testid="sidebar-overlay" />
       )}
+
+      <BroadcastReceiver />
+      <DevPanel />
     </div>
   );
 }
