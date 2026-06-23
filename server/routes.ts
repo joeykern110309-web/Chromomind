@@ -235,6 +235,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(tracks);
     } catch { res.status(500).json({ error: "Failed to get playlist tracks" }); }
   });
+  // Debug: test raw Spotify endpoints
+  app.get("/api/spotify/debug", async (_req, res) => {
+    try {
+      const token = await getAccessTokenForSdk();
+      if (!token) return res.status(401).json({ error: "Not connected" });
+      // Test playlists endpoint
+      const plRes = await fetch("https://api.spotify.com/v1/me/playlists?limit=5", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const plBody = await plRes.text();
+      // Test artist top tracks for a known artist
+      const artistRes = await fetch("https://api.spotify.com/v1/artists/3pjq2pDV9RR6VY55wBjVnp/top-tracks?market=DE", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const artistBody = await artistRes.text();
+      res.json({
+        playlists: { status: plRes.status, body: JSON.parse(plBody) },
+        artistTopTracks: { status: artistRes.status, body: artistBody.slice(0, 300) },
+      });
+    } catch (e) { res.status(500).json({ error: String(e) }); }
+  });
   app.get("/api/spotify/sdk-token", async (_req, res) => {
     const token = await getAccessTokenForSdk();
     if (!token) return res.status(401).json({ error: "Not connected" });
@@ -379,13 +400,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (artistFromName) console.log("[Chat] Artist-from name extracted:", artistFromName);
 
         // ── 2. Playlist patterns ───────────────────────────────────────────
-        // "show my playlists" / "zeig mir meine Playlists" / "liste meine Playlists"
-        const isPlaylistList = /(?:show|list|zeig(?:e)?|liste?|welche|was\s+(?:sind|habe?\s+ich)|meine[n]?)\s+(?:playlists?|wiedergabelisten?)/i.test(msg) ||
-          /(?:playlists?\s+(?:show|list|anzeigen|auflisten))/i.test(msg);
-
-        // "play my Chill playlist" / "spiel meine Chill Playlist"
+        // Check play-a-specific-playlist FIRST (more specific intent)
         const playlistPlayMatch = msg.match(
-          /(?:play|open|spiel(?:e)?|öffne?|starte?)\s+(?:my|meine[nm]?|die|den?|der)?\s*(.+?)\s*(?:playlist|wiedergabeliste)/i
+          /(?:play|open|spiel(?:e)?|öffne?|starte?)\s+(?:my|meine[nm]?|die|den?|der)?\s*(.+?)\s*(?:playlist|wiedergabeliste)\b/i
+        );
+
+        // List all playlists: only fires when NOT playing a specific playlist
+        // Matches: "zeig meine Playlists", "show my playlists", "welche Playlists habe ich"
+        // Does NOT match: "spiel meine Ka Playlist" (caught by playlistPlayMatch above)
+        const isPlaylistList = !playlistPlayMatch && (
+          /\b(?:show|list|zeig(?:e)?|anzeig(?:en)?|liste?)\b.{0,40}\bplaylists\b/i.test(msg) ||
+          /\bplaylists\b.{0,40}\b(?:show|list|zeig|anzeig|auflisten)\b/i.test(msg) ||
+          /\b(?:welche|was\s+(?:sind|hab(?:e)?|hast))\b.{0,40}\bplaylists?\b/i.test(msg) ||
+          /\b(?:meine|my)\s+playlists\b/i.test(msg) ||
+          /\balle\s+(?:meine[nr]?\s+)?playlists?\b/i.test(msg)
         );
 
         // ── 3. Queue patterns ──────────────────────────────────────────────

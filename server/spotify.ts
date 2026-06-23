@@ -419,47 +419,79 @@ export async function searchTracks(query: string, limit = 5): Promise<SpotifyTra
   } catch { return null; }
 }
 
-/** Get an artist's top tracks (up to 10). Returns null if artist not found. */
+/** Get an artist's top tracks (up to 10).
+ *  Strategy:
+ *  1. Find artist via search to get their canonical name + ID
+ *  2. Try /artists/{id}/top-tracks (may 403 in dev-mode apps)
+ *  3. Fall back to track search filtered to that artist
+ */
 export async function getArtistTopTracks(artistName: string): Promise<SpotifyTrack[] | null> {
   try {
     const trimmed = artistName.trim();
-    console.log("[Spotify] Searching artist:", JSON.stringify(trimmed));
+    console.log("[Spotify] getArtistTopTracks:", JSON.stringify(trimmed));
 
+    // Step 1: find artist
     const searchRes = await spotifyFetch(
       `/search?q=${encodeURIComponent(trimmed)}&type=artist&limit=3`
     );
     if (!searchRes?.ok) {
-      console.error("[Spotify] Artist search HTTP error:", searchRes?.status, await searchRes?.text().catch(() => ""));
+      console.error("[Spotify] Artist search failed:", searchRes?.status);
       return null;
     }
     const searchData = await searchRes.json();
     const artists: any[] = searchData.artists?.items || [];
     console.log("[Spotify] Artist search results:", artists.map((a: any) => `${a.name} (${a.id})`));
 
-    if (!artists.length) {
-      console.log("[Spotify] No artists found for:", trimmed);
-      return null;
-    }
+    if (!artists.length) return null;
     const artist = artists[0];
+    console.log("[Spotify] Using artist:", artist.name, artist.id);
 
-    // Try markets in order
-    for (const market of ["DE", "US", "GB", "AT", "CH"]) {
+    // Step 2: try official top-tracks endpoint
+    for (const market of ["DE", "US", "GB"]) {
       const topRes = await spotifyFetch(`/artists/${artist.id}/top-tracks?market=${market}`);
       if (topRes?.ok) {
         const topData = await topRes.json();
         const tracks: any[] = topData.tracks || [];
-        console.log(`[Spotify] ${artist.name} top-tracks (${market}):`, tracks.map((t: any) => t.name));
-        if (!tracks.length) continue;
-        return tracks.slice(0, 10).map((t: any) => ({
-          uri: t.uri,
-          name: t.name,
-          artistName: artist.name,
-          imageUrl: t.album?.images?.[0]?.url ?? null,
-        }));
+        if (tracks.length) {
+          console.log(`[Spotify] top-tracks (${market}): ${tracks.map((t: any) => t.name).join(", ")}`);
+          return tracks.slice(0, 10).map((t: any) => ({
+            uri: t.uri,
+            name: t.name,
+            artistName: artist.name,
+            imageUrl: t.album?.images?.[0]?.url ?? null,
+          }));
+        }
+      } else {
+        const errBody = await topRes?.text().catch(() => "");
+        console.log(`[Spotify] top-tracks ${market} failed:`, topRes?.status, errBody.slice(0, 120));
       }
-      console.log(`[Spotify] top-tracks ${market} failed:`, topRes?.status);
     }
-    return null;
+
+    // Step 3: fallback — search for tracks by this artist
+    console.log("[Spotify] Falling back to track search for artist:", artist.name);
+    const trackSearchRes = await spotifyFetch(
+      `/search?q=${encodeURIComponent(`artist:"${artist.name}"`)}&type=track&limit=20`
+    );
+    if (!trackSearchRes?.ok) {
+      console.error("[Spotify] Track search fallback failed:", trackSearchRes?.status);
+      return null;
+    }
+    const trackData = await trackSearchRes.json();
+    const allItems: any[] = trackData.tracks?.items || [];
+    // Filter to tracks that actually feature this artist
+    const artistLower = artist.name.toLowerCase();
+    const filtered = allItems.filter((t: any) =>
+      t.artists?.some((a: any) => a.name.toLowerCase() === artistLower)
+    );
+    const source = filtered.length >= 3 ? filtered : allItems;
+    const result = source.slice(0, 10).map((t: any) => ({
+      uri: t.uri,
+      name: t.name,
+      artistName: artist.name,
+      imageUrl: t.album?.images?.[0]?.url ?? null,
+    }));
+    console.log(`[Spotify] Track search fallback: ${result.map((t) => t.name).join(", ")}`);
+    return result.length ? result : null;
   } catch (e) {
     console.error("[Spotify] getArtistTopTracks exception:", e);
     return null;
@@ -475,11 +507,12 @@ export async function getUserPlaylists(): Promise<SpotifyPlaylist[] | null> {
       return null;
     }
     const data = await res.json();
-    return (data.items || []).map((p: any) => ({
+    return (data.items || []).filter(Boolean).map((p: any) => ({
       id: p.id,
       name: p.name,
       uri: p.uri,
-      trackCount: p.tracks?.total ?? 0,
+      // Spotify API returns either p.tracks.total or p.items.total depending on version
+      trackCount: p.tracks?.total ?? p.items?.total ?? 0,
       imageUrl: p.images?.[0]?.url ?? null,
     }));
   } catch (e) {
