@@ -16,6 +16,12 @@ import {
   getConfig,
   updateConfig,
   searchAndPlay,
+  searchTracks,
+  getArtistTopTracks,
+  getUserPlaylists,
+  playContext,
+  addToQueue,
+  getQueue,
   getAccessTokenForSdk,
   setSdkDeviceId,
   restoreFromRefreshToken,
@@ -303,39 +309,80 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // ── Spotify music intent detection ──────────────────────────────────────
       let directResponse: string | null = null;
 
+      // Helper: language-aware response selector
+      const loc = (de: string, en: string) => detectedLang === "German" ? de : en;
+
       try {
         const msg = content.toLowerCase();
 
+        // ── 1. Artist top-track patterns (EN + DE) ─────────────────────────
+        // "play Dardan's top track" / "spiel Dardans besten Song"
+        const artistTopMatch =
+          msg.match(/(?:play|spiel(?:e)?)\s+(.+?)(?:'s|s)?\s+(?:top|best|biggest|besten?|gr[öo]ßten?|bekanntesten?)\s+(?:track|song|hit|lied|titel)/i) ||
+          msg.match(/(?:play|spiel(?:e)?)\s+(?:the\s+)?(?:top|best|besten?)\s+(?:song|track|hit|lied|titel)\s+(?:by|from|von)\s+(.+)/i);
+
+        // "play something from Dardan" / "spiel etwas von Dardan" / "play a song by Dardan"
+        const artistFromMatch =
+          msg.match(/(?:play|spiel(?:e)?)\s+(?:something|etwas|einen?\s+song|einen?\s+titel|ein\s+lied)\s+(?:from|by|von)\s+(.+)/i) ||
+          msg.match(/(?:play|spiel(?:e)?)\s+(?:a\s+)?(?:random\s+)?(?:song|track|lied|titel)\s+(?:from|by|von)\s+(.+)/i);
+
+        // ── 2. Playlist patterns ───────────────────────────────────────────
+        // "show my playlists" / "zeig mir meine Playlists" / "liste meine Playlists"
+        const isPlaylistList = /(?:show|list|zeig(?:e)?|liste?|welche|was\s+(?:sind|habe?\s+ich)|meine[n]?)\s+(?:playlists?|wiedergabelisten?)/i.test(msg) ||
+          /(?:playlists?\s+(?:show|list|anzeigen|auflisten))/i.test(msg);
+
+        // "play my Chill playlist" / "spiel meine Chill Playlist"
+        const playlistPlayMatch = msg.match(
+          /(?:play|open|spiel(?:e)?|öffne?|starte?)\s+(?:my|meine[nm]?|die|den?|der)?\s*(.+?)\s*(?:playlist|wiedergabeliste)/i
+        );
+
+        // ── 3. Queue patterns ──────────────────────────────────────────────
+        // "add X to queue" / "füge X zur Warteschlange hinzu" / "queue X"
+        const queueAddMatch =
+          msg.match(/(?:add|füge?|stell(?:e)?)\s+(.+?)\s+(?:(?:to|in)(?:\s+(?:the|die|den?))?\s+(?:queue|warteschlange)|als\s+n[äa]chstes?|next|zur\s+(?:warteschlange|queue))/i) ||
+          msg.match(/^queue\s+(.+)/i);
+
+        // "show queue" / "zeig die Warteschlange" / "was kommt als nächstes"
+        const isQueueShow = /(?:show|what(?:'s|\s+is)\s+(?:in|on)|zeig(?:e)?|was\s+(?:ist\s+in|steht\s+in|kommt\s+als\s+n[äa]chstes?))\s+(?:(?:the|my|die|der|meine[nm]?)?\s+)?(?:queue|warteschlange)/i.test(msg) ||
+          /(?:queue|warteschlange)\s+(?:show|anzeigen|zeigen)/i.test(msg) ||
+          /was\s+kommt\s+als\s+n[äa]chstes/i.test(msg);
+
+        // ── 4. Standard play / control patterns ───────────────────────────
         const PLAY_PATTERNS = [
-          /(?:^|\s)(?:play\s+me|put\s+on|queue|start\s+playing)\s+(.+)/i,
+          /(?:^|\s)(?:play\s+me|put\s+on|start\s+playing)\s+(.+)/i,
           /(?:^|\s)(?:can|could|would)\s+you\s+play\s+(.+)/i,
           /(?:^|\s)i(?:'d)?\s+(?:want|like|love)\s+to\s+(?:hear|listen\s+to|play)\s+(.+)/i,
           /(?:^|\s)i\s+wanna\s+(?:hear|listen\s+to)\s+(.+)/i,
           /(?:^|\s)listen\s+to\s+(.+)/i,
           /(?:^|\s)spiel(?:e)?\s+(?:mir\s+)?(.+)/i,
           /(?:^|\s)leg\s+(.+?)\s+auf(?:\s|$)/i,
-          /(?:^|\s)ich\s+(?:will|möchte|würde\s+gern)\s+(?:gern\s+)?(.+?)\s+hören/i,
+          /(?:^|\s)ich\s+(?:will|m[öo]chte|w[üu]rde\s+gern)\s+(?:gern\s+)?(.+?)\s+h[öo]ren/i,
           /(?:^|\s)(?:joue|mets|lance)\s+(?:moi\s+)?(.+)/i,
           /(?:^|\s)(?:pon|reproduce|toca)\s+(.+)/i,
           /(?:^|\s)play\s+(.+)/i,
         ];
 
         let playMatch: RegExpMatchArray | null = null;
-        for (const pattern of PLAY_PATTERNS) {
-          playMatch = msg.match(pattern);
-          if (playMatch) break;
+        // Don't fire generic play if it's already an artist-specific command
+        if (!artistTopMatch && !artistFromMatch && !playlistPlayMatch) {
+          for (const pattern of PLAY_PATTERNS) {
+            playMatch = msg.match(pattern);
+            if (playMatch) break;
+          }
         }
 
-        const isSkip   = /\b(skip|next( song| track)?|überspringen|weiter|passer|suivant|siguiente)\b/.test(msg);
-        const isPrev   = /\b(previous|prev|go back|last song|zurück|précédent|anterior)\b/.test(msg);
-        const isPause  = /\b(pause|stop(?: the music| playing)?|pausieren|anhalten|pausa|arrêter)\b/.test(msg) && !playMatch;
+        const isSkip   = /\b(skip|next( song| track)?|[üu]berspringen|weiter|passer|suivant|siguiente)\b/.test(msg);
+        const isPrev   = /\b(previous|prev|go back|last song|zur[üu]ck|pr[ée]c[ée]dent|anterior)\b/.test(msg);
+        const isPause  = /\b(pause|stop(?: the music| playing)?|pausieren|anhalten|pausa|arr[eê]ter)\b/.test(msg) && !playMatch && !artistTopMatch && !artistFromMatch;
         const isResume = /\b(resume|unpause|continue playing|play again|weiterspielen|fortsetzen|reprendre|reanudar)\b/.test(msg);
-        const isMusicCommand = !!(playMatch || isSkip || isPrev || isPause || isResume);
+
+        const isMusicCommand = !!(playMatch || isSkip || isPrev || isPause || isResume ||
+          artistTopMatch || artistFromMatch || isPlaylistList || playlistPlayMatch ||
+          queueAddMatch || isQueueShow);
 
         const status = await getStatus();
 
         if (isMusicCommand && !status.connected) {
-          // Spotify not connected — tell user to log in, in their language
           const notConnectedMsgs: Record<string, string> = {
             German:     "Um Musik zu steuern, musst du zuerst dein Spotify-Konto verbinden. Klicke auf das Musik-Symbol in der Seitenleiste.",
             French:     "Pour contrôler la musique, connecte d'abord ton compte Spotify. Clique sur l'icône musique dans la barre latérale.",
@@ -347,7 +394,174 @@ export async function registerRoutes(app: Express): Promise<Server> {
           directResponse = notConnectedMsgs[detectedLang ?? "English"] ?? notConnectedMsgs["English"];
 
         } else if (status.connected) {
-          if (playMatch && !isSkip && !isPrev) {
+
+          // ── Artist top track ─────────────────────────────────────────────
+          if (artistTopMatch) {
+            const rawArtist = (artistTopMatch[1] || artistTopMatch[2] || "")
+              .replace(/\b(mir|bitte|please|for me)\b/gi, "").trim();
+            console.log("[Chat] Artist top-track intent, artist:", rawArtist);
+            const tracks = await getArtistTopTracks(rawArtist);
+            if (tracks && tracks.length > 0) {
+              const result = await searchAndPlay(`${tracks[0].name} ${tracks[0].artistName}`);
+              if (result.success) {
+                // Auto-queue remaining top tracks so music continues
+                for (const t of tracks.slice(1)) {
+                  await addToQueue(t.uri);
+                }
+                directResponse = loc(
+                  `Ich spiele jetzt "${tracks[0].name}" von ${tracks[0].artistName} — ihren Top-Track! Ich habe auch ihre anderen Top-Songs in die Warteschlange gelegt, damit die Musik weiterläuft.`,
+                  `Playing "${tracks[0].name}" by ${tracks[0].artistName} — their top track! I've queued their other top songs too so the music keeps going.`
+                );
+              } else {
+                directResponse = loc(
+                  `Ich konnte den Top-Track von "${rawArtist}" nicht abspielen. Stelle sicher, dass Spotify auf einem Gerät geöffnet ist.`,
+                  `Couldn't play "${rawArtist}"'s top track. Make sure Spotify is open on a device.`
+                );
+              }
+            } else {
+              directResponse = loc(
+                `Ich konnte keinen Künstler namens "${rawArtist}" auf Spotify finden.`,
+                `I couldn't find an artist called "${rawArtist}" on Spotify.`
+              );
+            }
+
+          // ── Artist "something from" ──────────────────────────────────────
+          } else if (artistFromMatch) {
+            const rawArtist = (artistFromMatch[1] || artistFromMatch[2] || "")
+              .replace(/\b(mir|bitte|please|for me)\b/gi, "").trim();
+            console.log("[Chat] Artist-from intent, artist:", rawArtist);
+            const tracks = await getArtistTopTracks(rawArtist);
+            if (tracks && tracks.length > 0) {
+              const result = await searchAndPlay(`${tracks[0].name} ${tracks[0].artistName}`);
+              if (result.success) {
+                for (const t of tracks.slice(1)) {
+                  await addToQueue(t.uri);
+                }
+                directResponse = loc(
+                  `Ich spiele "${tracks[0].name}" von ${tracks[0].artistName}! Weitere Songs von ihnen wurden zur Warteschlange hinzugefügt.`,
+                  `Playing "${tracks[0].name}" by ${tracks[0].artistName}! More songs from them have been queued up.`
+                );
+              } else {
+                directResponse = loc(
+                  `Ich konnte keinen Song von "${rawArtist}" abspielen. Stelle sicher, dass Spotify aktiv ist.`,
+                  `Couldn't play a song from "${rawArtist}". Make sure Spotify is active.`
+                );
+              }
+            } else {
+              directResponse = loc(
+                `Ich konnte keinen Künstler namens "${rawArtist}" auf Spotify finden.`,
+                `I couldn't find an artist called "${rawArtist}" on Spotify.`
+              );
+            }
+
+          // ── List playlists ───────────────────────────────────────────────
+          } else if (isPlaylistList) {
+            console.log("[Chat] Playlist list intent");
+            const playlists = await getUserPlaylists();
+            if (playlists && playlists.length > 0) {
+              const lines = playlists.map((p, i) => `${i + 1}. **${p.name}** (${p.trackCount} Songs)`).join("\n");
+              directResponse = loc(
+                `Hier sind deine Spotify-Playlists:\n\n${lines}\n\nSag einfach "spiel meine [Name] Playlist" um eine zu starten!`,
+                `Here are your Spotify playlists:\n\n${lines}\n\nJust say "play my [name] playlist" to start one!`
+              );
+            } else {
+              directResponse = loc(
+                "Ich konnte keine Playlists auf deinem Spotify-Konto finden.",
+                "I couldn't find any playlists on your Spotify account."
+              );
+            }
+
+          // ── Play playlist ────────────────────────────────────────────────
+          } else if (playlistPlayMatch) {
+            const playlistName = (playlistPlayMatch[1] || "")
+              .replace(/\b(my|meine[nm]?|mir|bitte|please)\b/gi, "").trim();
+            console.log("[Chat] Playlist play intent, name:", playlistName);
+            const playlists = await getUserPlaylists();
+            const found = playlists?.find(p =>
+              p.name.toLowerCase().includes(playlistName.toLowerCase()) ||
+              playlistName.toLowerCase().includes(p.name.toLowerCase())
+            );
+            if (found) {
+              const ok = await playContext(found.uri);
+              directResponse = ok
+                ? loc(
+                    `Ich spiele jetzt deine "${found.name}" Playlist!`,
+                    `Playing your "${found.name}" playlist now!`
+                  )
+                : loc(
+                    `Konnte die Playlist nicht starten — stelle sicher, dass Spotify auf einem Gerät aktiv ist.`,
+                    `Couldn't start the playlist — make sure Spotify is active on a device.`
+                  );
+            } else {
+              directResponse = loc(
+                `Ich konnte keine Playlist namens "${playlistName}" finden. Sag "zeig meine Playlists" um alle anzuzeigen.`,
+                `I couldn't find a playlist called "${playlistName}". Say "show my playlists" to see all of them.`
+              );
+            }
+
+          // ── Show queue ───────────────────────────────────────────────────
+          } else if (isQueueShow) {
+            console.log("[Chat] Queue show intent");
+            const queue = await getQueue();
+            if (queue) {
+              const currentLine = queue.current
+                ? loc(
+                    `**Jetzt läuft:** ${queue.current.name} — ${queue.current.artistName}`,
+                    `**Now playing:** ${queue.current.name} — ${queue.current.artistName}`
+                  )
+                : loc("*(Nichts spielt gerade)*", "*(Nothing playing right now)*");
+              if (queue.upcoming.length > 0) {
+                const upcomingLines = queue.upcoming
+                  .map((t, i) => `${i + 1}. ${t.name} — ${t.artistName}`)
+                  .join("\n");
+                directResponse = loc(
+                  `${currentLine}\n\n**Als nächstes in der Warteschlange:**\n${upcomingLines}`,
+                  `${currentLine}\n\n**Up next in queue:**\n${upcomingLines}`
+                );
+              } else {
+                directResponse = loc(
+                  `${currentLine}\n\nDie Warteschlange ist leer. Sage "füge [Song] zur Warteschlange hinzu" um Songs hinzuzufügen!`,
+                  `${currentLine}\n\nThe queue is empty. Say "add [song] to queue" to add songs!`
+                );
+              }
+            } else {
+              directResponse = loc(
+                "Ich konnte die Warteschlange nicht abrufen. Stelle sicher, dass Spotify aktiv ist.",
+                "Couldn't fetch the queue. Make sure Spotify is active."
+              );
+            }
+
+          // ── Add to queue ─────────────────────────────────────────────────
+          } else if (queueAddMatch) {
+            const queueQuery = (queueAddMatch[1] || "")
+              .replace(/\b(mir|bitte|please|for me)\b/gi, "").trim();
+            console.log("[Chat] Queue add intent, query:", queueQuery);
+            // Support "by/von" artist separator
+            const byMatch = queueQuery.match(/^(.+?)\s+(?:by|von|par|de)\s+(.+)$/i);
+            const searchQuery = byMatch
+              ? `track:"${byMatch[1].trim()}" artist:"${byMatch[2].trim()}"`
+              : `track:"${queueQuery}"`;
+            const tracks = await searchTracks(searchQuery, 1);
+            if (tracks && tracks.length > 0) {
+              const ok = await addToQueue(tracks[0].uri);
+              directResponse = ok
+                ? loc(
+                    `"${tracks[0].name}" von ${tracks[0].artistName} wurde zur Warteschlange hinzugefügt!`,
+                    `Added "${tracks[0].name}" by ${tracks[0].artistName} to the queue!`
+                  )
+                : loc(
+                    "Konnte nicht zur Warteschlange hinzufügen — stelle sicher, dass Spotify aktiv ist.",
+                    "Couldn't add to queue — make sure Spotify is active on a device."
+                  );
+            } else {
+              directResponse = loc(
+                `Ich konnte "${queueQuery}" auf Spotify nicht finden.`,
+                `I couldn't find "${queueQuery}" on Spotify.`
+              );
+            }
+
+          // ── Standard play (single track) ─────────────────────────────────
+          } else if (playMatch && !isSkip && !isPrev) {
             const rawQuery = playMatch[1]
               .replace(/\b(for me|please|now|right now|right now please|mir|bitte|jetzt)\b/gi, "")
               .trim();
@@ -357,30 +571,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
             if (byMatch) {
               query = `track:"${byMatch[1].trim()}" artist:"${byMatch[2].trim()}"`;
             } else {
-              // For short single/double-word titles, force exact title search to avoid Spotify
-              // returning tangentially related tracks (e.g. "Wind" → wrong result)
               const wordCount = rawQuery.trim().split(/\s+/).length;
               query = wordCount <= 3 ? `track:"${rawQuery}"` : rawQuery;
             }
             console.log("[Chat] Play intent detected, raw:", rawQuery, "→ query:", query);
             const result = await searchAndPlay(query);
             if (result.success) {
-              directResponse = `Playing "${result.trackName}" by ${result.artistName} now!`;
+              // Auto-queue artist's other top tracks so music continues after this song
+              try {
+                if (result.artistName) {
+                  const relatedTracks = await getArtistTopTracks(result.artistName);
+                  if (relatedTracks && relatedTracks.length > 1) {
+                    for (const t of relatedTracks.slice(1, 4)) {
+                      await addToQueue(t.uri);
+                    }
+                  }
+                }
+              } catch { /* auto-queue failure is non-fatal */ }
+              directResponse = loc(
+                `Ich spiele jetzt "${result.trackName}" von ${result.artistName}! Weitere Songs werden danach abgespielt.`,
+                `Playing "${result.trackName}" by ${result.artistName} now! More songs queued up after.`
+              );
             } else {
-              directResponse = `I couldn't play that — ${result.error}. Make sure Spotify is open and you're connected.`;
+              directResponse = loc(
+                `Ich konnte das nicht abspielen — ${result.error}. Stelle sicher, dass Spotify geöffnet ist.`,
+                `I couldn't play that — ${result.error}. Make sure Spotify is open and connected.`
+              );
             }
+
+          // ── Playback controls ─────────────────────────────────────────────
           } else if (isSkip) {
             const ok = await playerAction("next");
-            directResponse = ok ? "Skipped! Enjoy the next track." : "Couldn't skip — make sure Spotify is active on a device.";
+            directResponse = ok
+              ? loc("Übersprungen! Genieße den nächsten Track.", "Skipped! Enjoy the next track.")
+              : loc("Konnte nicht überspringen — stelle sicher, dass Spotify aktiv ist.", "Couldn't skip — make sure Spotify is active on a device.");
           } else if (isPrev) {
             const ok = await playerAction("previous");
-            directResponse = ok ? "Went back to the previous track." : "Couldn't go back — make sure Spotify is active.";
+            directResponse = ok
+              ? loc("Zurück zum vorherigen Track.", "Went back to the previous track.")
+              : loc("Konnte nicht zurückgehen — stelle sicher, dass Spotify aktiv ist.", "Couldn't go back — make sure Spotify is active.");
           } else if (isPause) {
             const ok = await playerAction("pause");
-            directResponse = ok ? "Paused." : "Couldn't pause — make sure Spotify is active.";
+            directResponse = ok
+              ? loc("Pausiert.", "Paused.")
+              : loc("Konnte nicht pausieren — stelle sicher, dass Spotify aktiv ist.", "Couldn't pause — make sure Spotify is active.");
           } else if (isResume) {
             const ok = await playerAction("play");
-            directResponse = ok ? "Resumed!" : "Couldn't resume — make sure Spotify is active.";
+            directResponse = ok
+              ? loc("Fortgesetzt!", "Resumed!")
+              : loc("Konnte nicht fortsetzen — stelle sicher, dass Spotify aktiv ist.", "Couldn't resume — make sure Spotify is active.");
           }
 
           if (!directResponse) {

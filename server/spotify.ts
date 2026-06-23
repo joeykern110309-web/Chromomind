@@ -390,3 +390,103 @@ export function disconnect() {
   config.refreshToken = undefined;
   saveConfig(config);
 }
+
+// ── New: artist / playlist / queue helpers ────────────────────────────────────
+
+/** Search tracks without playing — returns results for queue/display use */
+export async function searchTracks(query: string, limit = 5): Promise<Array<{ uri: string; name: string; artistName: string }> | null> {
+  try {
+    const res = await spotifyFetch(`/search?q=${encodeURIComponent(query)}&type=track&limit=${limit}`);
+    if (!res?.ok) return null;
+    const data = await res.json();
+    return (data.tracks?.items || []).map((t: any) => ({
+      uri: t.uri,
+      name: t.name,
+      artistName: t.artists.map((a: any) => a.name).join(", "),
+    }));
+  } catch { return null; }
+}
+
+/** Get an artist's top tracks (up to 5). Returns null if artist not found. */
+export async function getArtistTopTracks(artistName: string): Promise<Array<{ uri: string; name: string; artistName: string }> | null> {
+  try {
+    const searchRes = await spotifyFetch(`/search?q=${encodeURIComponent(artistName)}&type=artist&limit=1`);
+    if (!searchRes?.ok) return null;
+    const searchData = await searchRes.json();
+    const artist = searchData.artists?.items?.[0];
+    if (!artist) return null;
+
+    const topRes = await spotifyFetch(`/artists/${artist.id}/top-tracks?market=from_token`);
+    if (!topRes?.ok) return null;
+    const topData = await topRes.json();
+
+    return (topData.tracks || []).slice(0, 5).map((t: any) => ({
+      uri: t.uri,
+      name: t.name,
+      artistName: artist.name,
+    }));
+  } catch { return null; }
+}
+
+/** Get the user's saved playlists (up to 20). */
+export async function getUserPlaylists(): Promise<Array<{ id: string; name: string; uri: string; trackCount: number }> | null> {
+  try {
+    const res = await spotifyFetch("/me/playlists?limit=20");
+    if (!res?.ok) return null;
+    const data = await res.json();
+    return (data.items || []).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      uri: p.uri,
+      trackCount: p.tracks?.total ?? 0,
+    }));
+  } catch { return null; }
+}
+
+/** Play a Spotify context URI (playlist, album, artist). */
+export async function playContext(contextUri: string): Promise<boolean> {
+  try {
+    const preferredDevice = sdkDeviceId || await getActiveDeviceId();
+    const path = preferredDevice ? `/me/player/play?device_id=${preferredDevice}` : "/me/player/play";
+    const res = await spotifyFetch(path, {
+      method: "PUT",
+      body: JSON.stringify({ context_uri: contextUri }),
+    });
+    if (res && (res.ok || res.status === 204)) {
+      await new Promise(r => setTimeout(r, 600));
+      const resumePath = preferredDevice ? `/me/player/play?device_id=${preferredDevice}` : "/me/player/play";
+      await spotifyFetch(resumePath, { method: "PUT" });
+      return true;
+    }
+    return false;
+  } catch { return false; }
+}
+
+/** Add a track URI to the playback queue. */
+export async function addToQueue(trackUri: string): Promise<boolean> {
+  try {
+    const preferredDevice = sdkDeviceId || await getActiveDeviceId();
+    const deviceParam = preferredDevice ? `&device_id=${preferredDevice}` : "";
+    const res = await spotifyFetch(`/me/player/queue?uri=${encodeURIComponent(trackUri)}${deviceParam}`, { method: "POST" });
+    return !!(res && (res.ok || res.status === 204));
+  } catch { return false; }
+}
+
+/** Get the current playback queue (up to 8 upcoming tracks). */
+export async function getQueue(): Promise<{ current: { name: string; artistName: string } | null; upcoming: Array<{ name: string; artistName: string }> } | null> {
+  try {
+    const res = await spotifyFetch("/me/player/queue");
+    if (!res?.ok) return null;
+    const data = await res.json();
+    return {
+      current: data.currently_playing ? {
+        name: data.currently_playing.name,
+        artistName: data.currently_playing.artists?.map((a: any) => a.name).join(", ") ?? "",
+      } : null,
+      upcoming: (data.queue || []).slice(0, 8).map((t: any) => ({
+        name: t.name,
+        artistName: t.artists?.map((a: any) => a.name).join(", ") ?? "",
+      })),
+    };
+  } catch { return null; }
+}
