@@ -27,6 +27,27 @@ export default function Chat() {
   const [editTitle, setEditTitle] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // ── Visual Viewport (keyboard-aware height) ──────────────────────────────────
+  // Uses the Visual Viewport API so the container always matches the visible area,
+  // even when the on-screen keyboard is open in both normal and fullscreen mode.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      if (containerRef.current) {
+        containerRef.current.style.height = `${vv.height}px`;
+      }
+    };
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    update();
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, []);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -179,7 +200,7 @@ export default function Chat() {
   };
 
   return (
-    <div className="flex bg-background overflow-hidden" style={{ height: "100dvh" }}>
+    <div ref={containerRef} className="flex bg-background overflow-hidden" style={{ height: "100dvh" }}>
 
       {/* ── Sidebar ── */}
       <aside

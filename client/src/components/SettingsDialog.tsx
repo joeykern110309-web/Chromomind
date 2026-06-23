@@ -63,9 +63,16 @@ export default function SettingsDialog() {
                     </AvatarFallback>
                   </Avatar>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">
-                      {user.displayName ?? user.username}
-                    </p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-medium text-foreground truncate">
+                        {user.displayName ?? user.username}
+                      </p>
+                      {user.isOwner && (
+                        <span className="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--primary)/0.18)", color: "hsl(var(--primary))", border: "1px solid hsl(var(--primary)/0.35)", letterSpacing: "0.05em" }}>
+                          DEV
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-muted-foreground truncate">{user.username}</p>
                   </div>
                 </div>
