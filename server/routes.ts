@@ -19,6 +19,7 @@ import {
   searchTracks,
   getArtistTopTracks,
   getUserPlaylists,
+  getPlaylistTracks,
   playContext,
   playTracksInOrder,
   addToQueue,
@@ -27,6 +28,11 @@ import {
   setSdkDeviceId,
   restoreFromRefreshToken,
 } from "./spotify";
+
+/** Embed a structured card at the top of an AI message so the frontend renders rich UI */
+function spotifyCard(data: object, text: string): string {
+  return `SPOTIFY_CARD:${JSON.stringify(data)}\n${text}`;
+}
 
 // ── AI clients ────────────────────────────────────────────────────────────────
 const groqClients: Groq[] = [
@@ -205,6 +211,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   app.post("/api/spotify/disconnect", (_req, res) => {
     disconnect(); setSdkDeviceId(null); res.json({ success: true });
+  });
+  app.post("/api/spotify/play-context", async (req, res) => {
+    const { uri } = req.body as { uri?: string };
+    if (!uri) return res.status(400).json({ error: "uri required" });
+    try {
+      const ok = await playContext(uri);
+      res.json({ success: ok });
+    } catch { res.status(500).json({ error: "Failed to play context" }); }
+  });
+  app.post("/api/spotify/play-tracks", async (req, res) => {
+    const { uris } = req.body as { uris?: string[] };
+    if (!uris?.length) return res.status(400).json({ error: "uris required" });
+    try {
+      const ok = await playTracksInOrder(uris);
+      res.json({ success: ok });
+    } catch { res.status(500).json({ error: "Failed to play tracks" }); }
+  });
+  app.get("/api/spotify/playlist/:id/tracks", async (req, res) => {
+    try {
+      const tracks = await getPlaylistTracks(req.params.id, 30);
+      if (!tracks) return res.status(500).json({ error: "Failed to get tracks" });
+      res.json(tracks);
+    } catch { res.status(500).json({ error: "Failed to get playlist tracks" }); }
   });
   app.get("/api/spotify/sdk-token", async (_req, res) => {
     const token = await getAccessTokenForSdk();
@@ -422,17 +451,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (artistTopName) {
             const tracks = await getArtistTopTracks(artistTopName);
             if (tracks && tracks.length > 0) {
-              // playTracksInOrder creates a proper sequential context so "next" skips correctly
               const ok = await playTracksInOrder(tracks.map(t => t.uri));
               if (ok) {
-                directResponse = loc(
-                  `Ich spiele jetzt "${tracks[0].name}" von ${tracks[0].artistName} — ihren Top-Track! Die anderen Top-Songs laufen danach automatisch weiter.`,
-                  `Playing "${tracks[0].name}" by ${tracks[0].artistName} — their top track! Their other top songs follow automatically.`
+                directResponse = spotifyCard(
+                  { type: "artist_tracks", artistName: tracks[0].artistName, playing: true, tracks },
+                  loc(
+                    `Ich spiele jetzt die Top-Songs von ${tracks[0].artistName}! Alle ${tracks.length} Tracks laufen nacheinander.`,
+                    `Now playing top songs by ${tracks[0].artistName}! All ${tracks.length} tracks will play in order.`
+                  )
                 );
               } else {
                 directResponse = loc(
-                  `Ich konnte den Top-Track von "${artistTopName}" nicht abspielen. Stelle sicher, dass Spotify auf einem Gerät geöffnet ist.`,
-                  `Couldn't play "${artistTopName}"'s top track. Make sure Spotify is open on a device.`
+                  `Ich konnte die Top-Songs von "${artistTopName}" nicht abspielen. Stelle sicher, dass Spotify auf einem Gerät geöffnet ist.`,
+                  `Couldn't play "${artistTopName}"'s top tracks. Make sure Spotify is open on a device.`
                 );
               }
             } else {
@@ -448,9 +479,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             if (tracks && tracks.length > 0) {
               const ok = await playTracksInOrder(tracks.map(t => t.uri));
               if (ok) {
-                directResponse = loc(
-                  `Ich spiele "${tracks[0].name}" von ${tracks[0].artistName}! Weitere Songs von ihnen laufen danach.`,
-                  `Playing "${tracks[0].name}" by ${tracks[0].artistName}! More songs from them will follow.`
+                directResponse = spotifyCard(
+                  { type: "artist_tracks", artistName: tracks[0].artistName, playing: true, tracks },
+                  loc(
+                    `Ich spiele Songs von ${tracks[0].artistName}! Weitere Songs folgen automatisch.`,
+                    `Playing songs by ${tracks[0].artistName}! More songs will follow automatically.`
+                  )
                 );
               } else {
                 directResponse = loc(
@@ -470,10 +504,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.log("[Chat] Playlist list intent");
             const playlists = await getUserPlaylists();
             if (playlists && playlists.length > 0) {
-              const lines = playlists.map((p, i) => `${i + 1}. **${p.name}** (${p.trackCount} Songs)`).join("\n");
-              directResponse = loc(
-                `Hier sind deine Spotify-Playlists:\n\n${lines}\n\nSag einfach "spiel meine [Name] Playlist" um eine zu starten!`,
-                `Here are your Spotify playlists:\n\n${lines}\n\nJust say "play my [name] playlist" to start one!`
+              directResponse = spotifyCard(
+                { type: "playlists", items: playlists },
+                loc(
+                  `Hier sind deine ${playlists.length} Spotify-Playlists! Klicke auf Play um eine zu starten, oder sag "spiel meine [Name] Playlist".`,
+                  `Here are your ${playlists.length} Spotify playlists! Click Play to start one, or say "play my [name] playlist".`
+                )
               );
             } else {
               directResponse = loc(
@@ -493,7 +529,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
               playlistName.toLowerCase().includes(p.name.toLowerCase())
             );
             if (found) {
-              const ok = await playContext(found.uri);
+              // Try context play first; fall back to loading tracks individually
+              let ok = await playContext(found.uri);
+              if (!ok) {
+                console.log("[Chat] Context play failed, falling back to track-by-track");
+                const tracks = await getPlaylistTracks(found.id, 30);
+                if (tracks && tracks.length > 0) {
+                  ok = await playTracksInOrder(tracks.map(t => t.uri));
+                }
+              }
               directResponse = ok
                 ? loc(
                     `Ich spiele jetzt deine "${found.name}" Playlist!`,
@@ -515,24 +559,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.log("[Chat] Queue show intent");
             const queue = await getQueue();
             if (queue) {
-              const currentLine = queue.current
-                ? loc(
-                    `**Jetzt läuft:** ${queue.current.name} — ${queue.current.artistName}`,
-                    `**Now playing:** ${queue.current.name} — ${queue.current.artistName}`
+              const hasContent = queue.current || queue.upcoming.length > 0;
+              if (hasContent) {
+                directResponse = spotifyCard(
+                  { type: "queue", current: queue.current, upcoming: queue.upcoming },
+                  loc(
+                    queue.upcoming.length > 0
+                      ? `Hier ist deine aktuelle Warteschlange mit ${queue.upcoming.length} kommenden Songs!`
+                      : "Hier ist was gerade läuft — die Warteschlange ist danach leer.",
+                    queue.upcoming.length > 0
+                      ? `Here's your current queue with ${queue.upcoming.length} upcoming songs!`
+                      : "Here's what's playing — the queue is empty after this."
                   )
-                : loc("*(Nichts spielt gerade)*", "*(Nothing playing right now)*");
-              if (queue.upcoming.length > 0) {
-                const upcomingLines = queue.upcoming
-                  .map((t, i) => `${i + 1}. ${t.name} — ${t.artistName}`)
-                  .join("\n");
-                directResponse = loc(
-                  `${currentLine}\n\n**Als nächstes in der Warteschlange:**\n${upcomingLines}`,
-                  `${currentLine}\n\n**Up next in queue:**\n${upcomingLines}`
                 );
               } else {
                 directResponse = loc(
-                  `${currentLine}\n\nDie Warteschlange ist leer. Sage "füge [Song] zur Warteschlange hinzu" um Songs hinzuzufügen!`,
-                  `${currentLine}\n\nThe queue is empty. Say "add [song] to queue" to add songs!`
+                  "Gerade läuft nichts auf Spotify. Starte einen Song und frag mich dann nochmal!",
+                  "Nothing is playing on Spotify right now. Start a song and ask me again!"
                 );
               }
             } else {
@@ -591,23 +634,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
             if (foundTracks && foundTracks.length > 0) {
               const mainTrack = foundTracks[0];
               // Get artist top tracks to build a sequential context (so "next" works)
-              let uris = [mainTrack.uri];
+              let allTracks = [mainTrack];
               try {
                 const firstArtist = mainTrack.artistName.split(",")[0].trim();
                 const artistTracks = await getArtistTopTracks(firstArtist);
                 if (artistTracks && artistTracks.length > 1) {
-                  const extras = artistTracks
-                    .filter(t => t.uri !== mainTrack.uri)
-                    .slice(0, 4)
-                    .map(t => t.uri);
-                  uris = [mainTrack.uri, ...extras];
+                  const extras = artistTracks.filter(t => t.uri !== mainTrack.uri).slice(0, 9);
+                  allTracks = [mainTrack, ...extras];
                 }
               } catch { /* non-fatal */ }
-              const ok = await playTracksInOrder(uris);
+              const ok = await playTracksInOrder(allTracks.map(t => t.uri));
               if (ok) {
-                directResponse = loc(
-                  `Ich spiele jetzt "${mainTrack.name}" von ${mainTrack.artistName}! ${uris.length > 1 ? `${uris.length - 1} weitere Songs folgen danach.` : ""}`,
-                  `Playing "${mainTrack.name}" by ${mainTrack.artistName} now!${uris.length > 1 ? ` ${uris.length - 1} more songs queued after.` : ""}`
+                directResponse = spotifyCard(
+                  { type: "artist_tracks", artistName: mainTrack.artistName, playing: true, tracks: allTracks },
+                  loc(
+                    `Ich spiele jetzt "${mainTrack.name}" von ${mainTrack.artistName}!${allTracks.length > 1 ? ` ${allTracks.length - 1} weitere Songs folgen danach.` : ""}`,
+                    `Playing "${mainTrack.name}" by ${mainTrack.artistName} now!${allTracks.length > 1 ? ` ${allTracks.length - 1} more songs follow after.` : ""}`
+                  )
                 );
               } else {
                 directResponse = loc(

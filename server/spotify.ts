@@ -349,8 +349,6 @@ export async function searchAndPlay(query: string): Promise<{ success: boolean; 
     const track = data.tracks?.items?.[0];
     if (!track) return { success: false, error: "No tracks found for: " + query };
 
-    console.log("[Spotify] Found track:", track.name, "by", track.artists[0]?.name);
-
     const preferredDevice = sdkDeviceId || await getActiveDeviceId();
     const playPath = preferredDevice ? `/me/player/play?device_id=${preferredDevice}` : "/me/player/play";
     const playRes = await spotifyFetch(playPath, {
@@ -371,10 +369,6 @@ export async function searchAndPlay(query: string): Promise<{ success: boolean; 
       return { success: false, error: errDetail };
     }
 
-    await new Promise(r => setTimeout(r, 600));
-    const resumePath = preferredDevice ? `/me/player/play?device_id=${preferredDevice}` : "/me/player/play";
-    await spotifyFetch(resumePath, { method: "PUT" });
-
     return { success: true, trackName: track.name, artistName: track.artists.map((a: { name: string }) => a.name).join(", ") };
   } catch (e) {
     return { success: false, error: String(e) };
@@ -393,10 +387,25 @@ export function disconnect() {
   saveConfig(config);
 }
 
-// ── New: artist / playlist / queue helpers ────────────────────────────────────
+// ── Track / artist / playlist / queue helpers ─────────────────────────────────
+
+export interface SpotifyTrack {
+  uri: string;
+  name: string;
+  artistName: string;
+  imageUrl: string | null;
+}
+
+export interface SpotifyPlaylist {
+  id: string;
+  name: string;
+  uri: string;
+  trackCount: number;
+  imageUrl: string | null;
+}
 
 /** Search tracks without playing — returns results for queue/display use */
-export async function searchTracks(query: string, limit = 5): Promise<Array<{ uri: string; name: string; artistName: string }> | null> {
+export async function searchTracks(query: string, limit = 5): Promise<SpotifyTrack[] | null> {
   try {
     const res = await spotifyFetch(`/search?q=${encodeURIComponent(query)}&type=track&limit=${limit}`);
     if (!res?.ok) return null;
@@ -405,39 +414,103 @@ export async function searchTracks(query: string, limit = 5): Promise<Array<{ ur
       uri: t.uri,
       name: t.name,
       artistName: t.artists.map((a: any) => a.name).join(", "),
+      imageUrl: t.album?.images?.[0]?.url ?? null,
     }));
   } catch { return null; }
 }
 
-/** Get an artist's top tracks (up to 5). Returns null if artist not found. */
-export async function getArtistTopTracks(artistName: string): Promise<Array<{ uri: string; name: string; artistName: string }> | null> {
+/** Get an artist's top tracks (up to 10). Returns null if artist not found. */
+export async function getArtistTopTracks(artistName: string): Promise<SpotifyTrack[] | null> {
   try {
-    const searchRes = await spotifyFetch(`/search?q=${encodeURIComponent(artistName)}&type=artist&limit=1`);
-    if (!searchRes?.ok) return null;
-    const searchData = await searchRes.json();
-    const artist = searchData.artists?.items?.[0];
-    if (!artist) return null;
+    const trimmed = artistName.trim();
+    console.log("[Spotify] Searching artist:", JSON.stringify(trimmed));
 
-    const topRes = await spotifyFetch(`/artists/${artist.id}/top-tracks?market=DE`);
-    if (!topRes?.ok) {
-      // fallback to US market
-      const topResUs = await spotifyFetch(`/artists/${artist.id}/top-tracks?market=US`);
-      if (!topResUs?.ok) return null;
-      const topDataUs = await topResUs.json();
-      return (topDataUs.tracks || []).slice(0, 5).map((t: any) => ({
-        uri: t.uri,
-        name: t.name,
-        artistName: artist.name,
-      }));
+    const searchRes = await spotifyFetch(
+      `/search?q=${encodeURIComponent(trimmed)}&type=artist&limit=3`
+    );
+    if (!searchRes?.ok) {
+      console.error("[Spotify] Artist search HTTP error:", searchRes?.status, await searchRes?.text().catch(() => ""));
+      return null;
     }
-    const topData = await topRes.json();
+    const searchData = await searchRes.json();
+    const artists: any[] = searchData.artists?.items || [];
+    console.log("[Spotify] Artist search results:", artists.map((a: any) => `${a.name} (${a.id})`));
 
-    return (topData.tracks || []).slice(0, 5).map((t: any) => ({
-      uri: t.uri,
-      name: t.name,
-      artistName: artist.name,
+    if (!artists.length) {
+      console.log("[Spotify] No artists found for:", trimmed);
+      return null;
+    }
+    const artist = artists[0];
+
+    // Try markets in order
+    for (const market of ["DE", "US", "GB", "AT", "CH"]) {
+      const topRes = await spotifyFetch(`/artists/${artist.id}/top-tracks?market=${market}`);
+      if (topRes?.ok) {
+        const topData = await topRes.json();
+        const tracks: any[] = topData.tracks || [];
+        console.log(`[Spotify] ${artist.name} top-tracks (${market}):`, tracks.map((t: any) => t.name));
+        if (!tracks.length) continue;
+        return tracks.slice(0, 10).map((t: any) => ({
+          uri: t.uri,
+          name: t.name,
+          artistName: artist.name,
+          imageUrl: t.album?.images?.[0]?.url ?? null,
+        }));
+      }
+      console.log(`[Spotify] top-tracks ${market} failed:`, topRes?.status);
+    }
+    return null;
+  } catch (e) {
+    console.error("[Spotify] getArtistTopTracks exception:", e);
+    return null;
+  }
+}
+
+/** Get the user's saved playlists (up to 50). */
+export async function getUserPlaylists(): Promise<SpotifyPlaylist[] | null> {
+  try {
+    const res = await spotifyFetch("/me/playlists?limit=50");
+    if (!res?.ok) {
+      console.error("[Spotify] getUserPlaylists failed:", res?.status, await res?.text().catch(() => ""));
+      return null;
+    }
+    const data = await res.json();
+    return (data.items || []).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      uri: p.uri,
+      trackCount: p.tracks?.total ?? 0,
+      imageUrl: p.images?.[0]?.url ?? null,
     }));
-  } catch { return null; }
+  } catch (e) {
+    console.error("[Spotify] getUserPlaylists exception:", e);
+    return null;
+  }
+}
+
+/** Get tracks in a specific playlist (up to 30). */
+export async function getPlaylistTracks(playlistId: string, limit = 30): Promise<SpotifyTrack[] | null> {
+  try {
+    const res = await spotifyFetch(
+      `/playlists/${playlistId}/tracks?limit=${limit}&fields=items(track(uri,name,artists,album(images)))`
+    );
+    if (!res?.ok) {
+      console.error("[Spotify] getPlaylistTracks failed:", res?.status, await res?.text().catch(() => ""));
+      return null;
+    }
+    const data = await res.json();
+    return (data.items || [])
+      .filter((item: any) => item?.track?.uri)
+      .map((item: any) => ({
+        uri: item.track.uri,
+        name: item.track.name,
+        artistName: (item.track.artists || []).map((a: any) => a.name).join(", "),
+        imageUrl: item.track.album?.images?.[0]?.url ?? null,
+      }));
+  } catch (e) {
+    console.error("[Spotify] getPlaylistTracks exception:", e);
+    return null;
+  }
 }
 
 /** Play a list of track URIs in order — creates a proper sequential context so "next" works. */
@@ -446,33 +519,22 @@ export async function playTracksInOrder(uris: string[]): Promise<boolean> {
   try {
     const preferredDevice = sdkDeviceId || await getActiveDeviceId();
     const path = preferredDevice ? `/me/player/play?device_id=${preferredDevice}` : "/me/player/play";
+    console.log(`[Spotify] playTracksInOrder: ${uris.length} tracks, device=${preferredDevice}`);
     const res = await spotifyFetch(path, {
       method: "PUT",
       body: JSON.stringify({ uris }),
     });
-    if (!res || (!res.ok && res.status !== 204)) {
-      try { console.error("[Spotify] playTracksInOrder error:", await res?.text()); } catch { /* ignore */ }
+    if (!res) { console.error("[Spotify] playTracksInOrder: no response"); return false; }
+    if (!res.ok && res.status !== 204) {
+      const txt = await res.text().catch(() => "");
+      console.error("[Spotify] playTracksInOrder error:", res.status, txt);
       return false;
     }
-    await new Promise(r => setTimeout(r, 600));
-    await spotifyFetch(path, { method: "PUT" });
     return true;
-  } catch { return false; }
-}
-
-/** Get the user's saved playlists (up to 20). */
-export async function getUserPlaylists(): Promise<Array<{ id: string; name: string; uri: string; trackCount: number }> | null> {
-  try {
-    const res = await spotifyFetch("/me/playlists?limit=20");
-    if (!res?.ok) return null;
-    const data = await res.json();
-    return (data.items || []).map((p: any) => ({
-      id: p.id,
-      name: p.name,
-      uri: p.uri,
-      trackCount: p.tracks?.total ?? 0,
-    }));
-  } catch { return null; }
+  } catch (e) {
+    console.error("[Spotify] playTracksInOrder exception:", e);
+    return false;
+  }
 }
 
 /** Play a Spotify context URI (playlist, album, artist). */
@@ -480,18 +542,19 @@ export async function playContext(contextUri: string): Promise<boolean> {
   try {
     const preferredDevice = sdkDeviceId || await getActiveDeviceId();
     const path = preferredDevice ? `/me/player/play?device_id=${preferredDevice}` : "/me/player/play";
+    console.log(`[Spotify] playContext: ${contextUri}, device=${preferredDevice}`);
     const res = await spotifyFetch(path, {
       method: "PUT",
       body: JSON.stringify({ context_uri: contextUri }),
     });
-    if (res && (res.ok || res.status === 204)) {
-      await new Promise(r => setTimeout(r, 600));
-      const resumePath = preferredDevice ? `/me/player/play?device_id=${preferredDevice}` : "/me/player/play";
-      await spotifyFetch(resumePath, { method: "PUT" });
-      return true;
-    }
+    if (res && (res.ok || res.status === 204)) return true;
+    const txt = await res?.text().catch(() => "");
+    console.error("[Spotify] playContext failed:", res?.status, txt);
     return false;
-  } catch { return false; }
+  } catch (e) {
+    console.error("[Spotify] playContext exception:", e);
+    return false;
+  }
 }
 
 /** Add a track URI to the playback queue. */
@@ -504,21 +567,34 @@ export async function addToQueue(trackUri: string): Promise<boolean> {
   } catch { return false; }
 }
 
-/** Get the current playback queue (up to 8 upcoming tracks). */
-export async function getQueue(): Promise<{ current: { name: string; artistName: string } | null; upcoming: Array<{ name: string; artistName: string }> } | null> {
+export interface SpotifyQueueResult {
+  current: { name: string; artistName: string; imageUrl: string | null } | null;
+  upcoming: Array<{ name: string; artistName: string; imageUrl: string | null }>;
+}
+
+/** Get the current playback queue (up to 10 upcoming tracks). */
+export async function getQueue(): Promise<SpotifyQueueResult | null> {
   try {
     const res = await spotifyFetch("/me/player/queue");
-    if (!res?.ok) return null;
+    if (!res?.ok) {
+      console.error("[Spotify] getQueue failed:", res?.status, await res?.text().catch(() => ""));
+      return null;
+    }
     const data = await res.json();
     return {
       current: data.currently_playing ? {
         name: data.currently_playing.name,
         artistName: data.currently_playing.artists?.map((a: any) => a.name).join(", ") ?? "",
+        imageUrl: data.currently_playing.album?.images?.[0]?.url ?? null,
       } : null,
-      upcoming: (data.queue || []).slice(0, 8).map((t: any) => ({
+      upcoming: (data.queue || []).slice(0, 10).map((t: any) => ({
         name: t.name,
         artistName: t.artists?.map((a: any) => a.name).join(", ") ?? "",
+        imageUrl: t.album?.images?.[0]?.url ?? null,
       })),
     };
-  } catch { return null; }
+  } catch (e) {
+    console.error("[Spotify] getQueue exception:", e);
+    return null;
+  }
 }
