@@ -289,8 +289,37 @@ export async function getNowPlaying(): Promise<object | null> {
       duration: track.duration_ms,
       progress: data.progress_ms,
       trackUrl: track.external_urls?.spotify || null,
+      trackId: track.id || null,
+      artistId: track.artists?.[0]?.id || null,
     };
   } catch {
+    return null;
+  }
+}
+
+/** Get track recommendations seeded from the currently playing track.
+ *  Uses /recommendations with seed_tracks + seed_artists for variety.
+ */
+export async function getRecommendations(seedTrackId: string, seedArtistId?: string | null): Promise<SpotifyTrack[] | null> {
+  try {
+    const params = new URLSearchParams({ limit: "10", seed_tracks: seedTrackId });
+    if (seedArtistId) params.set("seed_artists", seedArtistId);
+    const res = await spotifyFetch(`/recommendations?${params.toString()}`);
+    if (!res?.ok) {
+      console.error("[Spotify] Recommendations failed:", res?.status, await res?.text().catch(() => ""));
+      return null;
+    }
+    const data = await res.json();
+    const tracks: any[] = data.tracks || [];
+    if (!tracks.length) return null;
+    return tracks.map((t: any) => ({
+      uri: t.uri,
+      name: t.name,
+      artistName: t.artists.map((a: any) => a.name).join(", "),
+      imageUrl: t.album?.images?.[0]?.url ?? null,
+    }));
+  } catch (err) {
+    console.error("[Spotify] getRecommendations error:", err);
     return null;
   }
 }

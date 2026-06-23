@@ -27,6 +27,7 @@ import {
   getAccessTokenForSdk,
   setSdkDeviceId,
   restoreFromRefreshToken,
+  getRecommendations,
 } from "./spotify";
 
 /** Embed a structured card at the top of an AI message so the frontend renders rich UI */
@@ -496,9 +497,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const isPause  = /\b(pause|stop(?: the music| playing)?|pausieren|anhalten|pausa|arr[eê]ter)\b/.test(msg) && !playMatch && !artistTopName && !artistFromName;
         const isResume = /\b(resume|unpause|continue playing|play again|weiterspielen|fortsetzen|reprendre|reanudar)\b/.test(msg);
 
+        const isRecommendations = !playMatch && !artistTopName && !artistFromName && (
+          /\b(?:ähnlich(?:es?|e)?|similar|like this|more like|etwas\s+ähnliches?|was\s+ähnliches?)\b/i.test(msg) ||
+          /\b(?:empfehl(?:ung(?:en)?|e|t)|recommend(?:ation(?:s)?)?)\b/i.test(msg) ||
+          /\b(?:mehr\s+davon|more\s+of\s+this|more\s+songs?\s+like|songs?\s+like\s+this)\b/i.test(msg) ||
+          /\b(?:was\s+passt\s+dazu|etwas\s+passendes?|something\s+similar|something\s+like\s+that)\b/i.test(msg) ||
+          /\b(?:entdecke?n?|discover|find\s+similar|finde?\s+ähnliches?)\b/i.test(msg)
+        );
+
         const isMusicCommand = !!(playMatch || isSkip || isPrev || isPause || isResume ||
           artistTopName || artistFromName || isPlaylistList || playlistPlayMatch ||
-          queueAddMatch || isQueueShow);
+          queueAddMatch || isQueueShow || isRecommendations);
 
         const status = await getStatus();
 
@@ -680,6 +689,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 `Ich konnte "${queueQuery}" auf Spotify nicht finden.`,
                 `I couldn't find "${queueQuery}" on Spotify.`
               );
+            }
+
+          // ── Recommendations ──────────────────────────────────────────────
+          } else if (isRecommendations) {
+            console.log("[Chat] Recommendations intent");
+            const nowPlaying = await getNowPlaying() as any;
+            if (!nowPlaying?.trackId) {
+              directResponse = loc(
+                "Es läuft gerade kein Song. Starte einen Song und frag mich dann für Empfehlungen!",
+                "Nothing is playing right now. Start a song first and then ask for recommendations!"
+              );
+            } else {
+              const tracks = await getRecommendations(nowPlaying.trackId, nowPlaying.artistId);
+              if (tracks && tracks.length > 0) {
+                const ok = await playTracksInOrder(tracks.map(t => t.uri));
+                if (ok) {
+                  directResponse = spotifyCard(
+                    { type: "artist_tracks", artistName: "Recommendations", playing: true, tracks },
+                    loc(
+                      `Basierend auf "${nowPlaying.trackName}" von ${nowPlaying.artistName} habe ich ${tracks.length} ähnliche Songs gefunden und starte sie jetzt!`,
+                      `Based on "${nowPlaying.trackName}" by ${nowPlaying.artistName}, I found ${tracks.length} similar songs and queued them up!`
+                    )
+                  );
+                } else {
+                  directResponse = loc(
+                    "Ich konnte die Empfehlungen nicht abspielen. Stelle sicher, dass Spotify auf einem Gerät aktiv ist.",
+                    "Couldn't play the recommendations. Make sure Spotify is active on a device."
+                  );
+                }
+              } else {
+                directResponse = loc(
+                  "Ich konnte keine Empfehlungen finden. Versuche es nach einem Moment nochmal.",
+                  "Couldn't find recommendations right now. Try again in a moment."
+                );
+              }
             }
 
           // ── Standard play (single track) ─────────────────────────────────

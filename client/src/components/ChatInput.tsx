@@ -1,6 +1,5 @@
-import { useState, useRef, useEffect } from "react";
-import { ArrowUp } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { ArrowUp, Mic, Square } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
 
 interface ChatInputProps {
@@ -8,11 +7,23 @@ interface ChatInputProps {
   disabled?: boolean;
 }
 
+declare global {
+  interface Window {
+    SpeechRecognition: typeof SpeechRecognition;
+    webkitSpeechRecognition: typeof SpeechRecognition;
+  }
+}
+
 export default function ChatInput({ onSend, disabled = false }: ChatInputProps) {
   const { t } = useLanguage();
   const [message, setMessage] = useState("");
   const [focused, setFocused] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [voiceSupported] = useState(() =>
+    typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition)
+  );
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -21,10 +32,55 @@ export default function ChatInput({ onSend, disabled = false }: ChatInputProps) 
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [message]);
 
+  const stopListening = useCallback(() => {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    setIsListening(false);
+  }, []);
+
+  const startListening = useCallback(() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+
+    const recognition = new SR();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = navigator.language || "de-DE";
+
+    recognition.onstart = () => setIsListening(true);
+
+    recognition.onresult = (e: SpeechRecognitionEvent) => {
+      const transcript = Array.from(e.results)
+        .map((r) => r[0].transcript)
+        .join("");
+      setMessage(transcript);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+      textareaRef.current?.focus();
+    };
+
+    recognition.onerror = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  }, []);
+
+  const toggleVoice = () => {
+    if (isListening) stopListening();
+    else startListening();
+  };
+
   const canSend = message.trim() && !disabled;
 
   const handleSend = () => {
     if (!canSend) return;
+    if (isListening) stopListening();
     onSend(message.trim());
     setMessage("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
@@ -36,19 +92,20 @@ export default function ChatInput({ onSend, disabled = false }: ChatInputProps) 
 
   return (
     <div className="relative px-4 pb-6 pt-3 bg-background" data-testid="chat-input-container">
-      {/* Gradient fade blending into the chat area */}
       <div
         className="pointer-events-none absolute inset-x-0 -top-10 h-10"
         style={{ background: "linear-gradient(to bottom, transparent, hsl(var(--background)))" }}
       />
 
       <div className="relative max-w-3xl mx-auto">
-        {/* Outer glow ring when focused */}
+        {/* Outer glow ring */}
         <div
           className="absolute -inset-[1px] rounded-2xl transition-opacity duration-300 pointer-events-none"
           style={{
-            background: `linear-gradient(135deg, hsl(var(--primary)/0.6), hsl(199 80% 50%/0.4))`,
-            opacity: focused ? (canSend ? 0.9 : 0.5) : 0,
+            background: isListening
+              ? `linear-gradient(135deg, hsl(0 80% 55%/0.7), hsl(0 70% 40%/0.4))`
+              : `linear-gradient(135deg, hsl(var(--primary)/0.6), hsl(199 80% 50%/0.4))`,
+            opacity: focused || isListening ? (canSend || isListening ? 0.9 : 0.5) : 0,
             borderRadius: "17px",
           }}
         />
@@ -57,10 +114,10 @@ export default function ChatInput({ onSend, disabled = false }: ChatInputProps) 
         <div
           className="relative flex items-end gap-3 rounded-2xl px-4 py-3"
           style={{
-            background: focused
+            background: focused || isListening
               ? "linear-gradient(145deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04))"
               : "linear-gradient(145deg, rgba(255,255,255,0.055), rgba(255,255,255,0.025))",
-            border: `1px solid ${focused ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.08)"}`,
+            border: `1px solid ${(focused || isListening) ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.08)"}`,
             backdropFilter: "blur(16px)",
             boxShadow: "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.07)",
             transition: "background 0.2s, border-color 0.2s",
@@ -73,13 +130,36 @@ export default function ChatInput({ onSend, disabled = false }: ChatInputProps) 
             onKeyDown={handleKeyDown}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
-            placeholder={t("messagePlaceholder")}
+            placeholder={isListening ? (t("listening") || "Listening…") : t("messagePlaceholder")}
             disabled={disabled}
             rows={1}
             className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none leading-relaxed min-h-[22px] max-h-40 py-0.5"
             style={{ height: "22px" }}
             data-testid="input-message"
           />
+
+          {/* Mic button */}
+          {voiceSupported && (
+            <button
+              onClick={toggleVoice}
+              disabled={disabled}
+              className="flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+              style={isListening ? {
+                background: "rgba(239,68,68,0.15)",
+                boxShadow: "0 0 0 0 rgba(239,68,68,0.6)",
+                animation: "mic-pulse 1.4s ease-in-out infinite",
+              } : {
+                background: "rgba(255,255,255,0.06)",
+              }}
+              title={isListening ? "Stop recording" : "Voice input"}
+              data-testid="button-voice"
+            >
+              {isListening
+                ? <Square className="w-3.5 h-3.5" style={{ color: "rgb(239,68,68)" }} />
+                : <Mic className="w-4 h-4" style={{ color: "rgba(255,255,255,0.45)" }} />
+              }
+            </button>
+          )}
 
           {/* Send button */}
           <button
@@ -103,9 +183,17 @@ export default function ChatInput({ onSend, disabled = false }: ChatInputProps) 
         </div>
 
         <p className="text-[11px] mt-2 text-center select-none" style={{ color: "rgba(255,255,255,0.2)" }}>
-          {t("enterToSend")}
+          {isListening ? (t("voiceHint") || "Speak now — click stop or press Enter to send") : t("enterToSend")}
         </p>
       </div>
+
+      <style>{`
+        @keyframes mic-pulse {
+          0%   { box-shadow: 0 0 0 0 rgba(239,68,68,0.55); }
+          70%  { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
+          100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+        }
+      `}</style>
     </div>
   );
 }

@@ -48,6 +48,8 @@ const T = {
     connected:           "Connected",
     nothingPlaying:      "Nothing playing",
     connectSpotify:      "Connect Spotify",
+    listening:           "Listening\u2026",
+    voiceHint:           "Speak now \u00b7 click stop or press Enter to send",
   },
   de: {
     appName:             "Chromomind",
@@ -86,6 +88,8 @@ const T = {
     connected:           "Verbunden",
     nothingPlaying:      "Nichts spielt",
     connectSpotify:      "Spotify verbinden",
+    listening:           "H\u00f6re zu\u2026",
+    voiceHint:           "Jetzt sprechen \u00b7 Stopp klicken oder Enter dr\u00fccken",
   },
   fr: {
     appName:             "Chromomind",
@@ -124,6 +128,8 @@ const T = {
     connected:           "Connect\u00e9",
     nothingPlaying:      "Rien en lecture",
     connectSpotify:      "Connecter Spotify",
+    listening:           "\u00c9coute en cours\u2026",
+    voiceHint:           "Parlez maintenant \u00b7 cliquez stop ou appuyez sur Entr\u00e9e",
   },
   es: {
     appName:             "Chromomind",
@@ -162,6 +168,8 @@ const T = {
     connected:           "Conectado",
     nothingPlaying:      "Nada en reproducci\u00f3n",
     connectSpotify:      "Conectar Spotify",
+    listening:           "Escuchando\u2026",
+    voiceHint:           "Habla ahora \u00b7 haz clic en parar o pulsa Enter para enviar",
   },
   it: {
     appName:             "Chromomind",
@@ -200,6 +208,8 @@ const T = {
     connected:           "Connesso",
     nothingPlaying:      "Niente in riproduzione",
     connectSpotify:      "Connetti Spotify",
+    listening:           "In ascolto\u2026",
+    voiceHint:           "Parla ora \u00b7 clicca stop o premi Invio per inviare",
   },
 } satisfies Record<Lang, Record<string, string>>;
 
