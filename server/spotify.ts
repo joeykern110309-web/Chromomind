@@ -214,14 +214,15 @@ async function getAccessToken(): Promise<string | null> {
 async function spotifyFetch(path: string, options: RequestInit = {}): Promise<Response | null> {
   const token = await getAccessToken();
   if (!token) return null;
-  return fetch(`https://api.spotify.com/v1${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
+  const method = (options.method || "GET").toUpperCase();
+  const url = `https://api.spotify.com/v1${path}`;
+  const headers: HeadersInit = { Authorization: `Bearer ${token}` };
+  if (options.body !== undefined) {
+    (headers as Record<string,string>)["Content-Type"] = "application/json";
+  }
+  const init: RequestInit = { method, headers };
+  if (options.body !== undefined) init.body = options.body;
+  return fetch(url, init);
 }
 
 export function handleLogin(_req: Request, res: ExpressResponse) {
@@ -467,30 +468,38 @@ export async function getArtistTopTracks(artistName: string): Promise<SpotifyTra
       }
     }
 
-    // Step 3: fallback — search for tracks by this artist
+    // Step 3: fallback — simple name search filtered to this artist
     console.log("[Spotify] Falling back to track search for artist:", artist.name);
+    // Use simple text search (no quoted syntax) — avoids 400 from Spotify's API parser
+    const trackQ = encodeURIComponent(artist.name);
     const trackSearchRes = await spotifyFetch(
-      `/search?q=${encodeURIComponent(`artist:"${artist.name}"`)}&type=track&limit=20`
+      `/search?q=${trackQ}&type=track&limit=10`
     );
     if (!trackSearchRes?.ok) {
-      console.error("[Spotify] Track search fallback failed:", trackSearchRes?.status);
+      const errText = await trackSearchRes?.text().catch(() => "");
+      console.error("[Spotify] Track search fallback failed:", trackSearchRes?.status, errText.slice(0, 100));
       return null;
     }
     const trackData = await trackSearchRes.json();
     const allItems: any[] = trackData.tracks?.items || [];
-    // Filter to tracks that actually feature this artist
+    console.log("[Spotify] Raw track search count:", allItems.length);
+    // Filter strictly to tracks where this artist appears (exact name match)
     const artistLower = artist.name.toLowerCase();
     const filtered = allItems.filter((t: any) =>
       t.artists?.some((a: any) => a.name.toLowerCase() === artistLower)
     );
-    const source = filtered.length >= 3 ? filtered : allItems;
+    // If we got enough exact matches use them; otherwise loosen to name-contains
+    const source = filtered.length >= 3 ? filtered :
+      allItems.filter((t: any) =>
+        t.artists?.some((a: any) => a.name.toLowerCase().includes(artistLower))
+      );
     const result = source.slice(0, 10).map((t: any) => ({
       uri: t.uri,
       name: t.name,
       artistName: artist.name,
       imageUrl: t.album?.images?.[0]?.url ?? null,
     }));
-    console.log(`[Spotify] Track search fallback: ${result.map((t) => t.name).join(", ")}`);
+    console.log(`[Spotify] Track search fallback result: ${result.map((t) => t.name).join(", ")}`);
     return result.length ? result : null;
   } catch (e) {
     console.error("[Spotify] getArtistTopTracks exception:", e);
@@ -501,7 +510,7 @@ export async function getArtistTopTracks(artistName: string): Promise<SpotifyTra
 /** Get the user's saved playlists (up to 50). */
 export async function getUserPlaylists(): Promise<SpotifyPlaylist[] | null> {
   try {
-    const res = await spotifyFetch("/me/playlists?limit=50");
+    const res = await spotifyFetch("/me/playlists?limit=20");
     if (!res?.ok) {
       console.error("[Spotify] getUserPlaylists failed:", res?.status, await res?.text().catch(() => ""));
       return null;

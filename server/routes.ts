@@ -236,26 +236,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch { res.status(500).json({ error: "Failed to get playlist tracks" }); }
   });
   // Debug: test raw Spotify endpoints
-  app.get("/api/spotify/debug", async (_req, res) => {
+  app.get("/api/spotify/debug", async (req, res) => {
     try {
       const token = await getAccessTokenForSdk();
       if (!token) return res.status(401).json({ error: "Not connected" });
-      // Test playlists endpoint
-      const plRes = await fetch("https://api.spotify.com/v1/me/playlists?limit=5", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const plBody = await plRes.text();
-      // Test artist top tracks for a known artist
-      const artistRes = await fetch("https://api.spotify.com/v1/artists/3pjq2pDV9RR6VY55wBjVnp/top-tracks?market=DE", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const artistBody = await artistRes.text();
+      const artistName = (req.query.artist as string) || "Dardan";
+      // Step 1: artist search
+      const artistSearchRes = await fetch(
+        `https://api.spotify.com/v1/search?q=${encodeURIComponent(artistName)}&type=artist&limit=3`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const artistSearchData = await artistSearchRes.json() as any;
+      const artists: any[] = artistSearchData.artists?.items || [];
+      const firstArtist = artists[0];
+      // Step 2: top-tracks (raw)
+      let topTracksResult: any = null;
+      if (firstArtist) {
+        const ttRes = await fetch(
+          `https://api.spotify.com/v1/artists/${firstArtist.id}/top-tracks?market=DE`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const ttBody = await ttRes.text();
+        topTracksResult = { status: ttRes.status, body: ttBody.slice(0, 400) };
+      }
+      // Step 3: track search fallback
+      let trackSearchResult: any = null;
+      if (firstArtist) {
+        const tsRes = await fetch(
+          `https://api.spotify.com/v1/search?q=${encodeURIComponent(`artist:"${firstArtist.name}"`)}&type=track&limit=10`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const tsData = await tsRes.json() as any;
+        const tracks: any[] = (tsData.tracks?.items || []).map((t: any) => ({
+          name: t.name, uri: t.uri, artists: t.artists?.map((a: any) => a.name)
+        }));
+        trackSearchResult = { status: tsRes.status, tracks };
+      }
+      // Full getArtistTopTracks call
+      const fullResult = await getArtistTopTracks(artistName);
       res.json({
-        playlists: { status: plRes.status, body: JSON.parse(plBody) },
-        artistTopTracks: { status: artistRes.status, body: artistBody.slice(0, 300) },
+        query: artistName,
+        artistSearch: { count: artists.length, top: artists.map((a: any) => ({ name: a.name, id: a.id })) },
+        topTracksRaw: topTracksResult,
+        trackSearchFallback: trackSearchResult,
+        fullResult: fullResult ? fullResult.map(t => ({ name: t.name, uri: t.uri })) : null,
       });
     } catch (e) { res.status(500).json({ error: String(e) }); }
   });
+  app.get("/api/spotify/test-artist", async (req, res) => {
+    const name = (req.query.name as string) || "Dardan";
+    // Test raw fetch vs spotifyFetch
+    const token = await getAccessTokenForSdk();
+    const url = `https://api.spotify.com/v1/search?q=${encodeURIComponent(name)}&type=track&limit=10`;
+    const rawRes = token ? await fetch(url, { headers: { Authorization: `Bearer ${token}` } }) : null;
+    const rawData = rawRes ? await rawRes.json() : null;
+    const rawTracks = (rawData?.tracks?.items || []).map((t: any) => ({ name: t.name, artists: t.artists?.map((a: any) => a.name) }));
+    // Also run getArtistTopTracks
+    const result = await getArtistTopTracks(name);
+    res.json({ name, rawStatus: rawRes?.status, rawCount: rawTracks.length, rawSample: rawTracks.slice(0, 3), result, count: result?.length ?? 0 });
+  });
+
   app.get("/api/spotify/sdk-token", async (_req, res) => {
     const token = await getAccessTokenForSdk();
     if (!token) return res.status(401).json({ error: "Not connected" });
