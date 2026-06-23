@@ -1,4 +1,4 @@
-import type { Request, Response } from "express";
+import type { Request, Response as ExpressResponse } from "express";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 
@@ -11,6 +11,8 @@ const SCOPES = [
   "user-modify-playback-state",
   "user-read-recently-played",
   "user-top-read",
+  "playlist-read-private",
+  "playlist-read-collaborative",
 ].join(" ");
 
 const CONFIG_FILE = join(process.cwd(), ".spotify-config.json");
@@ -222,7 +224,7 @@ async function spotifyFetch(path: string, options: RequestInit = {}): Promise<Re
   });
 }
 
-export function handleLogin(_req: Request, res: Response) {
+export function handleLogin(_req: Request, res: ExpressResponse) {
   if (!isConfigured()) return res.redirect("/?spotify=not-configured");
   const params = new URLSearchParams({
     client_id: config.clientId,
@@ -236,7 +238,7 @@ export function handleLogin(_req: Request, res: Response) {
 
 export async function handleCallback(
   req: Request,
-  res: Response,
+  res: ExpressResponse,
   onToken?: (refreshToken: string) => void
 ) {
   const { code, error } = req.query as { code?: string; error?: string };
@@ -416,8 +418,18 @@ export async function getArtistTopTracks(artistName: string): Promise<Array<{ ur
     const artist = searchData.artists?.items?.[0];
     if (!artist) return null;
 
-    const topRes = await spotifyFetch(`/artists/${artist.id}/top-tracks?market=from_token`);
-    if (!topRes?.ok) return null;
+    const topRes = await spotifyFetch(`/artists/${artist.id}/top-tracks?market=DE`);
+    if (!topRes?.ok) {
+      // fallback to US market
+      const topResUs = await spotifyFetch(`/artists/${artist.id}/top-tracks?market=US`);
+      if (!topResUs?.ok) return null;
+      const topDataUs = await topResUs.json();
+      return (topDataUs.tracks || []).slice(0, 5).map((t: any) => ({
+        uri: t.uri,
+        name: t.name,
+        artistName: artist.name,
+      }));
+    }
     const topData = await topRes.json();
 
     return (topData.tracks || []).slice(0, 5).map((t: any) => ({
@@ -426,6 +438,26 @@ export async function getArtistTopTracks(artistName: string): Promise<Array<{ ur
       artistName: artist.name,
     }));
   } catch { return null; }
+}
+
+/** Play a list of track URIs in order — creates a proper sequential context so "next" works. */
+export async function playTracksInOrder(uris: string[]): Promise<boolean> {
+  if (!uris.length) return false;
+  try {
+    const preferredDevice = sdkDeviceId || await getActiveDeviceId();
+    const path = preferredDevice ? `/me/player/play?device_id=${preferredDevice}` : "/me/player/play";
+    const res = await spotifyFetch(path, {
+      method: "PUT",
+      body: JSON.stringify({ uris }),
+    });
+    if (!res || (!res.ok && res.status !== 204)) {
+      try { console.error("[Spotify] playTracksInOrder error:", await res?.text()); } catch { /* ignore */ }
+      return false;
+    }
+    await new Promise(r => setTimeout(r, 600));
+    await spotifyFetch(path, { method: "PUT" });
+    return true;
+  } catch { return false; }
 }
 
 /** Get the user's saved playlists (up to 20). */
