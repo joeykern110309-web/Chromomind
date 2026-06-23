@@ -138,14 +138,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ googleEnabled: GOOGLE_CONFIGURED });
   });
 
-  const OWNER_EMAIL = "Joeykern11.03.09@gmail.com";
+  const OWNER_EMAIL = "joeykern11.03.09@gmail.com";
+  const OWNER_GOOGLE_ID = "google_108577457563246748278";
 
   app.get("/api/auth/me", (req, res) => {
+    res.set("Cache-Control", "no-store");
     if (!req.isAuthenticated || !req.isAuthenticated()) {
       return res.status(401).json({ error: "Unauthorized" });
     }
     const user = req.user as Express.User;
-    const isOwner = user.username?.toLowerCase() === OWNER_EMAIL.toLowerCase();
+    const isOwner =
+      user.id === OWNER_GOOGLE_ID ||
+      (user.username?.toLowerCase() ?? "") === OWNER_EMAIL;
+    console.log(`[Auth] /me → ${user.id} (${user.username}) isOwner=${isOwner}`);
     res.json({ id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, isOwner });
   });
 
