@@ -1,6 +1,7 @@
 {
   "name": "Chromomind",
   "short_name": "Chromomind",
+  "id": "/",
   "description": "Your AI, your conversations — signed in.",
   "start_url": "/",
   "display": "standalone",
@@ -25,6 +26,22 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot-mobile.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Chromomind chat on mobile"
+    },
+    {
+      "src": "/screenshot-desktop.png",
+      "sizes": "1280x800",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Chromomind chat on desktop"
     }
   ],
   "shortcuts": [
