@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#111d35"/>
+      <stop offset="100%" stop-color="#07101e"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00d4ff" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#00d4ff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="boltGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <!-- Background -->
+  <rect width="512" height="512" rx="114" fill="url(#bg)"/>
+  <!-- Ambient glow -->
+  <circle cx="256" cy="256" r="155" fill="url(#glow)"/>
+  <!-- Ring -->
+  <circle cx="256" cy="256" r="184" fill="none" stroke="#00d4ff" stroke-width="8"
+    stroke-opacity="0.9" filter="url(#boltGlow)"/>
+  <!-- Inner disc -->
+  <circle cx="256" cy="256" r="172" fill="#0a1222"/>
+  <!-- Lightning bolt (Lucide Zap scaled to fit disc) -->
+  <polygon points="284,95 176,272 240,272 232,417 336,240 272,240"
+    fill="#1ee1ff" filter="url(#boltGlow)"/>
+</svg>
