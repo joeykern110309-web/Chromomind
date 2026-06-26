@@ -104,7 +104,16 @@ export default function Chat() {
       window.history.replaceState({}, "", "/");
       queryClient.invalidateQueries({ queryKey: ["/api/spotify/status"] });
     } else if (s === "error") {
-      toast({ title: "Spotify connection failed", description: "Check your credentials.", variant: "destructive" });
+      const reason = params.get("reason") || "";
+      const desc =
+        reason === "redirect_uri_mismatch"
+          ? "Redirect URI mismatch — copy the URI from Dev Panel → Spotify and add it to your Spotify Dashboard."
+          : reason === "access_denied"
+          ? "Access denied — you cancelled the Spotify login."
+          : reason
+          ? `Error: ${reason}`
+          : "Check your Client ID, Secret, and that the redirect URI is added to your Spotify Dashboard.";
+      toast({ title: "Spotify connection failed", description: desc, variant: "destructive" });
       window.history.replaceState({}, "", "/");
     } else if (s === "not-configured") {
       toast({ title: "Spotify not configured", description: "Enter your credentials first.", variant: "destructive" });

@@ -1,5 +1,5 @@
 import type { Request, Response as ExpressResponse } from "express";
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 
 const SCOPES = [
@@ -15,7 +15,8 @@ const SCOPES = [
   "playlist-read-collaborative",
 ].join(" ");
 
-const CONFIG_FILE = join(process.cwd(), ".spotify-config.json");
+const DATA_DIR = join(process.cwd(), "data");
+const CONFIG_FILE = join(DATA_DIR, "spotify-config.json");
 
 interface SpotifyConfig {
   clientId: string;
@@ -51,6 +52,7 @@ function loadConfig(): SpotifyConfig {
 
 function saveConfig(cfg: SpotifyConfig) {
   try {
+    mkdirSync(DATA_DIR, { recursive: true });
     writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), "utf-8");
   } catch (e) {
     console.error("Failed to persist Spotify config:", e);
@@ -244,8 +246,12 @@ export async function handleCallback(
   redirectUri?: string,
 ) {
   const { code, error } = req.query as { code?: string; error?: string };
-  if (error || !code) return res.redirect("/?spotify=error");
+  if (error || !code) {
+    console.error("[Spotify] OAuth callback error from Spotify:", error || "no code");
+    return res.redirect(`/?spotify=error&reason=${encodeURIComponent(error || "no_code")}`);
+  }
   const uri = redirectUri || config.redirectUri;
+  console.log("[Spotify] Exchanging code, redirect_uri:", uri);
   try {
     const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
       method: "POST",
@@ -259,7 +265,12 @@ export async function handleCallback(
         redirect_uri: uri,
       }),
     });
-    if (!tokenRes.ok) return res.redirect("/?spotify=error");
+    if (!tokenRes.ok) {
+      const body = await tokenRes.text().catch(() => "");
+      console.error("[Spotify] Token exchange failed:", tokenRes.status, body);
+      const reason = body.includes("redirect_uri") ? "redirect_uri_mismatch" : `http_${tokenRes.status}`;
+      return res.redirect(`/?spotify=error&reason=${encodeURIComponent(reason)}`);
+    }
     const data = await tokenRes.json();
     tokenStore = {
       accessToken: data.access_token,
@@ -270,8 +281,9 @@ export async function handleCallback(
     saveConfig(config);
     if (onToken) onToken(data.refresh_token);
     res.redirect("/?spotify=connected");
-  } catch {
-    res.redirect("/?spotify=error");
+  } catch (e) {
+    console.error("[Spotify] Token exchange exception:", e);
+    res.redirect("/?spotify=error&reason=exception");
   }
 }
 
