@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { Zap, X, Megaphone, Users, Send, Trash2, Music, MessageSquare } from "lucide-react";
+import { Zap, X, Megaphone, Users, Send, Trash2, Music, MessageSquare, Settings } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
+import SpotifySettings from "@/components/SpotifySettings";
 
 interface UserStat {
   id: string;
@@ -25,7 +26,7 @@ interface Broadcast {
   timestamp: string;
 }
 
-type Tab = "broadcast" | "users";
+type Tab = "broadcast" | "users" | "spotify";
 
 export default function DevPanel() {
   const { user } = useAuth();
@@ -86,6 +87,12 @@ export default function DevPanel() {
     u.displayName?.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2) ||
     u.username.slice(0, 2).toUpperCase();
 
+  const TABS = [
+    ["broadcast", Megaphone, "Broadcast"],
+    ["users", Users, "Users"],
+    ["spotify", Settings, "Spotify"],
+  ] as const;
+
   return (
     <>
       {/* Floating trigger button */}
@@ -135,7 +142,7 @@ export default function DevPanel() {
 
           {/* Tabs */}
           <div className="flex border-b" style={{ borderColor: "hsl(var(--primary)/0.1)" }}>
-            {([["broadcast", Megaphone, "Broadcast"], ["users", Users, "Users"]] as const).map(([key, Icon, label]) => (
+            {TABS.map(([key, Icon, label]) => (
               <button
                 key={key}
                 onClick={() => setTab(key as Tab)}
@@ -250,6 +257,19 @@ export default function DevPanel() {
               ) : (
                 <p className="p-4 text-xs text-center" style={{ color: "rgba(255,255,255,0.3)" }}>Failed to load stats</p>
               )}
+            </div>
+          )}
+
+          {/* Tab: Spotify */}
+          {tab === "spotify" && (
+            <div className="p-4 space-y-3">
+              <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.4)" }}>
+                Spotify credentials
+              </p>
+              <p className="text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>
+                Configure your Spotify app credentials. These are only visible to you.
+              </p>
+              <SpotifySettings inDevPanel />
             </div>
           )}
         </div>

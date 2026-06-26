@@ -180,6 +180,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ success: true });
   });
 
+  // ── Owner notes (read + write) ───────────────────────────────────────────────
+  app.get("/api/owner/notes", requireOwner, async (_req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.json({ notes: await storage.getOwnerNotes() });
+  });
+
+  app.post("/api/owner/notes", requireOwner, async (req, res) => {
+    const { notes } = req.body;
+    if (typeof notes !== "string") return res.status(400).json({ error: "notes must be a string" });
+    await storage.setOwnerNotes(notes);
+    res.json({ success: true });
+  });
+
   // ── Admin: stats ────────────────────────────────────────────────────────────
   app.get("/api/admin/stats", requireOwner, async (_req, res) => {
     res.set("Cache-Control", "no-store");
@@ -445,7 +458,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/chat", requireAuth, async (req, res) => {
     try {
       const { conversationId, content } = sendMessageSchema.parse(req.body);
-      const userId = (req.user as Express.User).id;
+      const chatUser = req.user as Express.User;
+      const userId = chatUser.id;
+      const isOwner =
+        chatUser.id === OWNER_GOOGLE_ID ||
+        (chatUser.username?.toLowerCase() ?? "") === OWNER_EMAIL;
 
       let convId = conversationId;
       let conversation;
@@ -482,9 +499,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      const ownerNotes = isOwner ? await storage.getOwnerNotes() : "";
+
       let systemPrompt = detectedLang
         ? `CRITICAL SYSTEM RULE: The user is communicating in ${detectedLang}. You MUST respond ONLY in ${detectedLang}. Using any other language is a violation. Never switch to English.\n\n${SYSTEM_PROMPT}`
         : SYSTEM_PROMPT;
+
+      if (isOwner && ownerNotes.trim()) {
+        systemPrompt += `\n\n--- OWNER NOTES ---\nThe following are private notes written by the owner (you are talking to the owner now). You can read, reference, and update these notes when asked. To update the notes, include a <notes_update>new full notes content here</notes_update> block anywhere in your response — it will be saved automatically and stripped from the visible reply.\n\nCurrent notes:\n${ownerNotes}\n--- END NOTES ---`;
+      } else if (isOwner) {
+        systemPrompt += `\n\nYou are talking to the owner. They have a private notes section in settings where they can write ideas, feature requests, and reminders. It is currently empty. If asked to save something to notes, include a <notes_update>content here</notes_update> block in your response and it will be saved automatically.`;
+      }
 
       // ── Spotify music intent detection ──────────────────────────────────────
       let directResponse: string | null = null;
@@ -919,6 +944,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         aiContent =
           (await chatCompletion(msgs, 1024)) ||
           "I'm sorry, I couldn't generate a response.";
+      }
+
+      // ── Extract and save any notes_update blocks the AI emitted ──────────────
+      const notesMatch = aiContent.match(/<notes_update>([\s\S]*?)<\/notes_update>/);
+      if (notesMatch && isOwner) {
+        await storage.setOwnerNotes(notesMatch[1].trim());
+        aiContent = aiContent.replace(/<notes_update>[\s\S]*?<\/notes_update>/g, "").trim();
       }
 
       const assistantMessage = await storage.addMessage(convId, {

@@ -1,17 +1,22 @@
-import { Settings, Moon, Sun, Check, LogOut } from "lucide-react";
+import { Settings, Moon, Sun, Check, LogOut, StickyNote, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Textarea } from "@/components/ui/textarea";
 import { useLanguage, LANGUAGES } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useEffect, useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
-import { queryClient } from "@/lib/queryClient";
+import { queryClient as qc, apiRequest } from "@/lib/queryClient";
 
 export default function SettingsDialog() {
   const { lang, setLang, t } = useLanguage();
   const { user, logout } = useAuth();
+  const queryClient = useQueryClient();
   const [theme, setTheme] = useState<"light" | "dark">("dark");
+  const [notes, setNotes] = useState("");
+  const [notesSaved, setNotesSaved] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("theme") as "light" | "dark" | null;
@@ -28,12 +33,30 @@ export default function SettingsDialog() {
 
   const handleLogout = async () => {
     await logout();
-    queryClient.clear();
+    qc.clear();
   };
 
   const initials = user?.displayName
     ? user.displayName.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
     : user?.username?.slice(0, 2).toUpperCase() ?? "?";
+
+  const { data: notesData } = useQuery<{ notes: string }>({
+    queryKey: ["/api/owner/notes"],
+    enabled: !!user?.isOwner,
+  });
+
+  useEffect(() => {
+    if (notesData?.notes !== undefined) setNotes(notesData.notes);
+  }, [notesData]);
+
+  const saveNotesMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/owner/notes", { notes }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/owner/notes"] });
+      setNotesSaved(true);
+      setTimeout(() => setNotesSaved(false), 2000);
+    },
+  });
 
   return (
     <Dialog>
@@ -151,6 +174,39 @@ export default function SettingsDialog() {
               </button>
             </div>
           </div>
+
+          {/* Owner Notes */}
+          {user?.isOwner && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+                  <StickyNote className="w-3 h-3" />
+                  Notes
+                </p>
+                <p className="text-[10px] text-muted-foreground/60">AI can read & write these</p>
+              </div>
+              <Textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Feature ideas, reminders, feedback for the AI…"
+                className="text-sm min-h-[100px] resize-none"
+                data-testid="textarea-owner-notes"
+              />
+              <Button
+                size="sm"
+                className="w-full gap-2"
+                onClick={() => saveNotesMutation.mutate()}
+                disabled={saveNotesMutation.isPending}
+                data-testid="button-save-notes"
+              >
+                {notesSaved ? (
+                  <><Check className="w-3.5 h-3.5" /> Saved</>
+                ) : (
+                  <><Save className="w-3.5 h-3.5" /> {saveNotesMutation.isPending ? "Saving…" : "Save notes"}</>
+                )}
+              </Button>
+            </div>
+          )}
 
         </div>
       </DialogContent>

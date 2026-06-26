@@ -21,6 +21,9 @@ export interface IStorage {
   addMessage(conversationId: string, message: Omit<Message, "id">): Promise<Message>;
   deleteConversation(id: string): Promise<boolean>;
   getConversationCountByUser(): Promise<Record<string, number>>;
+
+  getOwnerNotes(): Promise<string>;
+  setOwnerNotes(notes: string): Promise<void>;
 }
 
 export class FileStorage implements IStorage {
@@ -37,19 +40,8 @@ export class FileStorage implements IStorage {
       const data = JSON.parse(raw);
       if (data.users) this.users = new Map(Object.entries(data.users) as [string, User][]);
       if (data.conversations) this.conversations = new Map(Object.entries(data.conversations) as [string, any][]);
+      if (data.ownerNotes) this.ownerNotes = data.ownerNotes;
     } catch { /* first run */ }
-  }
-
-  private persist() {
-    try {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-      fs.writeFileSync(DATA_FILE, JSON.stringify({
-        users: Object.fromEntries(this.users),
-        conversations: Object.fromEntries(this.conversations),
-      }));
-    } catch (e) {
-      console.error("[Storage] Persist failed:", e);
-    }
   }
 
   async getUser(id: string): Promise<User | undefined> {
@@ -141,6 +133,30 @@ export class FileStorage implements IStorage {
       if (uid) counts[uid] = (counts[uid] ?? 0) + 1;
     }
     return counts;
+  }
+
+  private ownerNotes: string = "";
+
+  async getOwnerNotes(): Promise<string> {
+    return this.ownerNotes;
+  }
+
+  async setOwnerNotes(notes: string): Promise<void> {
+    this.ownerNotes = notes;
+    this.persist();
+  }
+
+  private persist() {
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(DATA_FILE, JSON.stringify({
+        users: Object.fromEntries(this.users),
+        conversations: Object.fromEntries(this.conversations),
+        ownerNotes: this.ownerNotes,
+      }));
+    } catch (e) {
+      console.error("[Storage] Persist failed:", e);
+    }
   }
 }
 

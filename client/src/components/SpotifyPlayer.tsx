@@ -3,7 +3,6 @@ import { SkipBack, SkipForward, Play, Pause, Music2, LogIn, LogOut } from "lucid
 import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
-import SpotifySettings from "@/components/SpotifySettings";
 import { useSpotifySDK } from "@/hooks/use-spotify-sdk";
 
 interface NowPlaying {
@@ -75,7 +74,6 @@ export default function SpotifyPlayer() {
             <p className="text-xs font-semibold text-sidebar-foreground">Spotify</p>
             <p className="text-xs text-muted-foreground">Not connected</p>
           </div>
-          <SpotifySettings />
         </div>
         <a href="/api/spotify/login" data-testid="button-spotify-connect">
           <Button
@@ -125,7 +123,6 @@ export default function SpotifyPlayer() {
           )}
         </div>
         <div className="flex items-center gap-0.5 flex-shrink-0">
-          <SpotifySettings />
           <Button
             size="icon"
             variant="ghost"
