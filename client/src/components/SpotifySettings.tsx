@@ -47,16 +47,19 @@ export default function SpotifySettings({ inDevPanel }: Props) {
   };
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      apiRequest("POST", "/api/spotify/config", {
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/spotify/config", {
         clientId: clientId.trim(),
         ...(clientSecret.trim() ? { clientSecret: clientSecret.trim() } : {}),
         redirectUri: detectedRedirectUri,
-      }),
+      });
+      return res.json();
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/spotify/config"] });
       queryClient.invalidateQueries({ queryKey: ["/api/spotify/status"] });
-      toast({ title: "Settings saved", description: "Spotify credentials updated." });
+      // Navigate to Spotify OAuth immediately after saving credentials
+      window.location.href = "/api/spotify/login";
     },
     onError: () => {
       toast({ title: "Failed to save", variant: "destructive" });
@@ -143,7 +146,7 @@ export default function SpotifySettings({ inDevPanel }: Props) {
         disabled={saveMutation.isPending || !clientId.trim() || (!cfg?.hasSecret && !clientSecret.trim())}
         data-testid="button-save-spotify-settings"
       >
-        {saveMutation.isPending ? "Saving…" : "Save & Reconnect"}
+        {saveMutation.isPending ? "Saving…" : "Save & Connect Spotify"}
       </Button>
     </div>
   );

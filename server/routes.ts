@@ -278,7 +278,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ...(clientSecret !== undefined ? { clientSecret } : {}),
       ...(redirectUri !== undefined ? { redirectUri } : {}),
     });
-    res.json({ success: true });
+    const cfg = getConfig();
+    console.log("[Spotify] Config saved — clientId:", !!cfg.clientId, "| hasSecret:", cfg.hasSecret, "| redirectUri:", cfg.redirectUri);
+    res.json({ success: true, loginUrl: spotifyCallbackURL(req).replace("/api/spotify/callback", "/api/spotify/login") });
   });
 
   /** Same dynamic URL approach as Google OAuth */
