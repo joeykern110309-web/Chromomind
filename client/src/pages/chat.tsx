@@ -145,6 +145,12 @@ export default function Chat() {
       queryClient.setQueryData(["/api/conversations", data.conversationId], data.conversation);
       if (!activeConversationId) setActiveConversationId(data.conversationId);
       setIsTyping(false);
+      // Refresh Spotify player after any music command (skip, pause, etc.)
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["/api/spotify/now-playing"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/spotify/status"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/spotify/queue"] });
+      }, 1200);
     },
     onError: () => {
       setIsTyping(false);
