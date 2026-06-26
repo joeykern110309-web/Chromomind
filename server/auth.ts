@@ -31,15 +31,12 @@ passport.deserializeUser(async (id: string, done) => {
 });
 
 if (GOOGLE_CONFIGURED) {
-  const callbackURL =
-    process.env.GOOGLE_REDIRECT_URI ?? "http://localhost:5000/api/auth/google/callback";
-
   passport.use(
     new GoogleStrategy(
       {
         clientID: process.env.GOOGLE_CLIENT_ID!,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-        callbackURL,
+        callbackURL: "/api/auth/google/callback", // relative — overridden per-request at runtime
       },
       async (_accessToken, _refreshToken, profile, done) => {
         try {

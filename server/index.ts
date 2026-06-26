@@ -8,6 +8,7 @@ import { setupVite, serveStatic, log } from "./vite";
 const FileStoreSession = FileStore(session);
 
 const app = express();
+app.set("trust proxy", 1); // Replit production runs behind a reverse proxy
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -23,7 +24,11 @@ app.use(
     secret: process.env.SESSION_SECRET || "chromomind-dev-secret",
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false, maxAge: 30 * 24 * 60 * 60 * 1000 },
+    cookie: {
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    },
   })
 );
 app.use(passport.initialize());

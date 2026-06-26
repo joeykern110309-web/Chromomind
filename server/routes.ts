@@ -211,13 +211,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar, isOwner });
   });
 
+  /** Build the absolute callback URL from the incoming request — works on dev AND prod */
+  function googleCallbackURL(req: Request): string {
+    const proto = (req.get("x-forwarded-proto") || req.protocol).split(",")[0].trim();
+    const host  = req.get("x-forwarded-host") || req.get("host") || "localhost:5000";
+    return `${proto}://${host}/api/auth/google/callback`;
+  }
+
   if (GOOGLE_CONFIGURED) {
-    app.get("/api/auth/google", passport.authenticate("google", { scope: ["profile", "email"] }));
+    app.get("/api/auth/google", (req, res, next) => {
+      passport.authenticate("google", {
+        scope: ["profile", "email"],
+        callbackURL: googleCallbackURL(req),
+      })(req, res, next);
+    });
+
     app.get(
       "/api/auth/google/callback",
-      passport.authenticate("google", { failureRedirect: "/?auth_error=1" }),
+      (req, res, next) => {
+        passport.authenticate("google", {
+          callbackURL: googleCallbackURL(req),
+          failureRedirect: "/?auth_error=1",
+        })(req, res, next);
+      },
       async (req, res) => {
-        // Restore this user's saved Spotify session after login
         const user = req.user as Express.User;
         if (user?.id) {
           const savedToken = await storage.getUserSpotifyToken(user.id);
