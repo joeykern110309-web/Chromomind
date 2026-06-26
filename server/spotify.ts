@@ -172,7 +172,7 @@ export function isConnected(): boolean {
 }
 
 function isConfigured(): boolean {
-  return !!(config.clientId && config.clientSecret && config.redirectUri);
+  return !!(config.clientId && config.clientSecret);
 }
 
 async function refreshAccessToken(): Promise<boolean> {
@@ -224,12 +224,13 @@ async function spotifyFetch(path: string, options: RequestInit = {}): Promise<Re
   });
 }
 
-export function handleLogin(_req: Request, res: ExpressResponse) {
+export function handleLogin(_req: Request, res: ExpressResponse, redirectUri?: string) {
   if (!isConfigured()) return res.redirect("/?spotify=not-configured");
+  const uri = redirectUri || config.redirectUri;
   const params = new URLSearchParams({
     client_id: config.clientId,
     response_type: "code",
-    redirect_uri: config.redirectUri,
+    redirect_uri: uri,
     scope: SCOPES,
     show_dialog: "true",
   });
@@ -239,10 +240,12 @@ export function handleLogin(_req: Request, res: ExpressResponse) {
 export async function handleCallback(
   req: Request,
   res: ExpressResponse,
-  onToken?: (refreshToken: string) => void
+  onToken?: (refreshToken: string) => void,
+  redirectUri?: string,
 ) {
   const { code, error } = req.query as { code?: string; error?: string };
   if (error || !code) return res.redirect("/?spotify=error");
+  const uri = redirectUri || config.redirectUri;
   try {
     const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
       method: "POST",
@@ -253,7 +256,7 @@ export async function handleCallback(
       body: new URLSearchParams({
         grant_type: "authorization_code",
         code,
-        redirect_uri: config.redirectUri,
+        redirect_uri: uri,
       }),
     });
     if (!tokenRes.ok) return res.redirect("/?spotify=error");

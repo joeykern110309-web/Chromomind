@@ -268,17 +268,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ success: true });
   });
 
+  /** Same dynamic URL approach as Google OAuth */
+  function spotifyCallbackURL(req: Request): string {
+    const proto = (req.get("x-forwarded-proto") || req.protocol).split(",")[0].trim();
+    const host  = req.get("x-forwarded-host") || req.get("host") || "localhost:5000";
+    return `${proto}://${host}/api/spotify/callback`;
+  }
+
   // ── Spotify OAuth ─────────────────────────────────────────────────────────────
-  app.get("/api/spotify/login", handleLogin);
+  app.get("/api/spotify/login", (req, res) => handleLogin(req, res, spotifyCallbackURL(req)));
   app.get("/api/spotify/callback", async (req, res) => {
     await handleCallback(req, res, async (refreshToken) => {
-      // Save the Spotify refresh token to the logged-in user's account
       const user = req.user as Express.User | undefined;
       if (user?.id) {
         await storage.updateUserSpotifyToken(user.id, refreshToken);
         console.log(`[Auth] Spotify token saved to user account: ${user.id}`);
       }
-    });
+    }, spotifyCallbackURL(req));
   });
   app.get("/api/spotify/status", async (_req, res) => {
     try { res.json(await getStatus()); }
