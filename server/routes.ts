@@ -249,11 +249,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       },
       async (req, res) => {
         const user = req.user as Express.User;
-        if (user?.id) {
+        // Only restore Spotify session when the owner logs in — prevents other users
+        // from hijacking or overwriting the global Spotify tokenStore
+        const isOwnerLogin =
+          user?.id === OWNER_GOOGLE_ID ||
+          (user?.username?.toLowerCase() ?? "") === OWNER_EMAIL;
+        if (isOwnerLogin) {
           const savedToken = await storage.getUserSpotifyToken(user.id);
           if (savedToken) {
             const ok = await restoreFromRefreshToken(savedToken);
-            console.log(`[Auth] Spotify restore on login for ${user.id}: ${ok ? "OK" : "failed"}`);
+            console.log(`[Auth] Spotify restore on owner login: ${ok ? "OK" : "failed"}`);
           }
         }
         res.redirect("/");
@@ -266,7 +271,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   app.post("/api/auth/logout", (req: any, res) => {
-    req.logout(() => res.json({ success: true }));
+    req.logout(() => {
+      req.session.destroy(() => {
+        res.clearCookie("connect.sid");
+        res.json({ success: true });
+      });
+    });
   });
 
   // ── Spotify Config ────────────────────────────────────────────────────────────
@@ -280,26 +290,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
     const cfg = getConfig();
     console.log("[Spotify] Config saved — clientId:", !!cfg.clientId, "| hasSecret:", cfg.hasSecret, "| redirectUri:", cfg.redirectUri);
-    res.json({ success: true, loginUrl: spotifyCallbackURL(req).replace("/api/spotify/callback", "/api/spotify/login") });
+    res.json({ success: true, loginUrl: "https://chromomind.replit.app/api/spotify/login" });
   });
 
-  /** Same dynamic URL approach as Google OAuth */
-  function spotifyCallbackURL(req: Request): string {
-    const proto = (req.get("x-forwarded-proto") || req.protocol).split(",")[0].trim();
-    const host  = req.get("x-forwarded-host") || req.get("host") || "localhost:5000";
-    return `${proto}://${host}/api/spotify/callback`;
-  }
+  const SPOTIFY_REDIRECT_URI = "https://chromomind.replit.app/api/spotify/callback";
 
   // ── Spotify OAuth ─────────────────────────────────────────────────────────────
-  app.get("/api/spotify/login", (req, res) => handleLogin(req, res, spotifyCallbackURL(req)));
+  app.get("/api/spotify/login", (req, res) => handleLogin(req, res, SPOTIFY_REDIRECT_URI));
   app.get("/api/spotify/callback", async (req, res) => {
     await handleCallback(req, res, async (refreshToken) => {
       const user = req.user as Express.User | undefined;
-      if (user?.id) {
-        await storage.updateUserSpotifyToken(user.id, refreshToken);
-        console.log(`[Auth] Spotify token saved to user account: ${user.id}`);
+      // Only save the token to the owner account — Spotify is owner-only
+      if (user?.id === OWNER_GOOGLE_ID || (user?.username?.toLowerCase() ?? "") === OWNER_EMAIL) {
+        await storage.updateUserSpotifyToken(user!.id, refreshToken);
+        console.log(`[Auth] Spotify token saved to owner account: ${user!.id}`);
       }
-    }, spotifyCallbackURL(req));
+    }, SPOTIFY_REDIRECT_URI);
   });
   app.get("/api/spotify/queue", async (_req, res) => {
     try {

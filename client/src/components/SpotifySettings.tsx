@@ -26,7 +26,7 @@ export default function SpotifySettings({ inDevPanel }: Props) {
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
 
-  const detectedRedirectUri = `${window.location.origin}/api/spotify/callback`;
+  const detectedRedirectUri = "https://chromomind.replit.app/api/spotify/callback";
 
   const { data: cfg } = useQuery<SpotifyConfigResponse>({
     queryKey: ["/api/spotify/config"],
