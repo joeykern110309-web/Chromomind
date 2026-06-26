@@ -58,8 +58,7 @@ export default function SpotifySettings({ inDevPanel }: Props) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/spotify/config"] });
       queryClient.invalidateQueries({ queryKey: ["/api/spotify/status"] });
-      // Navigate to Spotify OAuth immediately after saving credentials
-      window.location.href = "/api/spotify/login";
+      toast({ title: "Credentials saved!", description: "Now click Connect Spotify below." });
     },
     onError: () => {
       toast({ title: "Failed to save", variant: "destructive" });
@@ -146,8 +145,18 @@ export default function SpotifySettings({ inDevPanel }: Props) {
         disabled={saveMutation.isPending || !clientId.trim() || (!cfg?.hasSecret && !clientSecret.trim())}
         data-testid="button-save-spotify-settings"
       >
-        {saveMutation.isPending ? "Saving…" : "Save & Connect Spotify"}
+        {saveMutation.isPending ? "Saving…" : "Save Credentials"}
       </Button>
+      <a href="/api/spotify/login" className="block">
+        <Button
+          className="w-full"
+          size="sm"
+          style={{ background: "#1DB954", color: "#000" }}
+          data-testid="button-spotify-connect-devpanel"
+        >
+          Connect Spotify
+        </Button>
+      </a>
     </div>
   );
 
