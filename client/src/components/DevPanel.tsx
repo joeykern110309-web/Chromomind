@@ -94,35 +94,15 @@ export default function DevPanel() {
   ] as const;
 
   return (
-    <div className="border-t border-sidebar-border flex-shrink-0">
-      {/* Trigger row */}
-      <button
-        onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center justify-between px-4 py-2.5 transition-colors hover-elevate"
-        data-testid="button-dev-panel"
-      >
-        <div className="flex items-center gap-2">
-          <Zap className="w-3.5 h-3.5" style={{ color: "hsl(var(--primary))" }} strokeWidth={2.5} />
-          <span className="text-xs font-bold tracking-widest uppercase" style={{ color: "hsl(var(--primary))" }}>
-            Dev Panel
-          </span>
-          {activeBroadcast && (
-            <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" style={{ boxShadow: "0 0 6px hsl(var(--primary)/0.8)" }} />
-          )}
-        </div>
-        {open
-          ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-          : <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" />}
-      </button>
-
-      {/* Expandable panel — opens upward within the sidebar */}
+    <div className="border-t border-sidebar-border flex-shrink-0 flex flex-col">
+      {/* Expandable panel — renders ABOVE the trigger */}
       {open && (
         <div
-          className="border-t"
-          style={{ borderColor: "hsl(var(--primary)/0.15)" }}
+          className="border-b flex flex-col"
+          style={{ borderColor: "hsl(var(--primary)/0.15)", maxHeight: "60vh" }}
         >
           {/* Tabs */}
-          <div className="flex border-b" style={{ borderColor: "hsl(var(--primary)/0.1)" }}>
+          <div className="flex border-b flex-shrink-0" style={{ borderColor: "hsl(var(--primary)/0.1)" }}>
             {TABS.map(([key, Icon, label]) => (
               <button
                 key={key}
@@ -143,7 +123,7 @@ export default function DevPanel() {
 
           {/* Tab: Broadcast */}
           {tab === "broadcast" && (
-            <div className="p-3 space-y-3">
+            <div className="p-3 space-y-3 overflow-y-auto flex-1">
               {activeBroadcast && (
                 <div className="rounded-lg p-2.5 space-y-1.5" style={{ background: "hsl(var(--primary)/0.08)", border: "1px solid hsl(var(--primary)/0.18)" }}>
                   <div className="flex items-center justify-between">
@@ -229,12 +209,32 @@ export default function DevPanel() {
 
           {/* Tab: Spotify */}
           {tab === "spotify" && (
-            <div className="p-3">
+            <div className="p-3 overflow-y-auto flex-1">
               <SpotifySettings inDevPanel />
             </div>
           )}
         </div>
       )}
+
+      {/* Trigger row — always at the bottom */}
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 transition-colors hover-elevate"
+        data-testid="button-dev-panel"
+      >
+        <div className="flex items-center gap-2">
+          <Zap className="w-3.5 h-3.5" style={{ color: "hsl(var(--primary))" }} strokeWidth={2.5} />
+          <span className="text-xs font-bold tracking-widest uppercase" style={{ color: "hsl(var(--primary))" }}>
+            Dev Panel
+          </span>
+          {activeBroadcast && (
+            <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" style={{ boxShadow: "0 0 6px hsl(var(--primary)/0.8)" }} />
+          )}
+        </div>
+        {open
+          ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+          : <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" />}
+      </button>
     </div>
   );
 }
