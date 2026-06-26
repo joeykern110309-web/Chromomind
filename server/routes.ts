@@ -299,6 +299,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }, spotifyCallbackURL(req));
   });
+  app.get("/api/spotify/queue", async (_req, res) => {
+    try {
+      const queue = await getQueue();
+      if (!queue) return res.status(503).json({ error: "Spotify not connected" });
+      res.json(queue);
+    } catch { res.status(500).json({ error: "Failed to fetch queue" }); }
+  });
+
   app.get("/api/spotify/status", async (_req, res) => {
     try { res.json(await getStatus()); }
     catch { res.status(500).json({ error: "Failed to get Spotify status" }); }
@@ -576,10 +584,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           msg.match(/(?:add|füge?|stell(?:e)?)\s+(.+?)\s+(?:(?:to|in)(?:\s+(?:the|die|den?))?\s+(?:queue|warteschlange)|als\s+n[äa]chstes?|next|zur\s+(?:warteschlange|queue))/i) ||
           msg.match(/^queue\s+(.+)/i);
 
-        // "show queue" / "zeig die Warteschlange" / "was kommt als nächstes"
-        const isQueueShow = /(?:show|what(?:'s|\s+is)\s+(?:in|on)|zeig(?:e)?|was\s+(?:ist\s+in|steht\s+in|kommt\s+als\s+n[äa]chstes?))\s+(?:(?:the|my|die|der|meine[nm]?)?\s+)?(?:queue|warteschlange)/i.test(msg) ||
+        // "show queue" / "zeig mir die Warteschlange" / "was kommt als nächstes"
+        const isQueueShow =
+          /(?:show|what(?:'s|\s+is)\s+(?:in|on)|zeig(?:e)?(?:\s+mir)?)\s+(?:(?:the|my|die|der|meine[nm]?)?\s+)?(?:queue|warteschlange)/i.test(msg) ||
           /(?:queue|warteschlange)\s+(?:show|anzeigen|zeigen)/i.test(msg) ||
-          /was\s+kommt\s+als\s+n[äa]chstes/i.test(msg);
+          /was\s+kommt\s+(?:als\s+n[äa]chstes?|danach|jetzt|als\s+n[äa]chstes)/i.test(msg) ||
+          /was\s+(?:l[äa]uft|spielt|kommt)\s+(?:danach|als\s+n[äa]chstes?|nach\s+diesem?)/i.test(msg) ||
+          /zeig(?:e)?\s+(?:mir\s+)?(?:(?:die|meine|der)\s+)?warteschlange/i.test(msg) ||
+          /n[äa]chste[rns]?\s+(?:song|track|lied|titel|musik)/i.test(msg) ||
+          /\bwarteschlange\b/i.test(msg);
 
         // ── 4. Standard play / control patterns ───────────────────────────
         const PLAY_PATTERNS = [

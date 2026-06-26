@@ -1,6 +1,7 @@
 import { Zap, User, Play, Music, ListMusic, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -160,15 +161,27 @@ function PlaylistsCard({ items }: { items: SpotifyPlaylist[] }) {
   );
 }
 
-// ── Queue card ────────────────────────────────────────────────────────────────
+// ── Queue card (live-polling) ─────────────────────────────────────────────────
+
+interface QueueTrack { name: string; artistName: string; imageUrl: string | null; }
+interface LiveQueue { current: QueueTrack | null; upcoming: QueueTrack[]; }
 
 function QueueCard({
-  current,
-  upcoming,
+  current: initialCurrent,
+  upcoming: initialUpcoming,
 }: {
-  current: { name: string; artistName: string; imageUrl: string | null } | null | undefined;
-  upcoming: Array<{ name: string; artistName: string; imageUrl: string | null }>;
+  current: QueueTrack | null | undefined;
+  upcoming: QueueTrack[];
 }) {
+  const { data: live } = useQuery<LiveQueue>({
+    queryKey: ["/api/spotify/queue"],
+    refetchInterval: 5000,
+    staleTime: 3000,
+  });
+
+  const current  = live?.current  ?? initialCurrent;
+  const upcoming = live?.upcoming ?? initialUpcoming;
+
   return (
     <div className="mt-3 mb-1 space-y-2" data-testid="card-queue">
       {current && (

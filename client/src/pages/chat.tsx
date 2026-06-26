@@ -335,6 +335,7 @@ export default function Chat() {
         </div>
 
         <SpotifyPlayer />
+        <DevPanel />
       </aside>
 
       {/* ── Main panel ── */}
@@ -407,7 +408,6 @@ export default function Chat() {
       )}
 
       <BroadcastReceiver />
-      <DevPanel />
     </div>
   );
 }
