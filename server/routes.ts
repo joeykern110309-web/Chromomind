@@ -255,17 +255,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       },
       async (req, res) => {
         const user = req.user as Express.User;
-        // Only restore Spotify session when the owner logs in — prevents other users
-        // from hijacking or overwriting the global Spotify tokenStore
-        const isOwnerLogin =
-          user?.id === OWNER_GOOGLE_ID ||
-          (user?.username?.toLowerCase() ?? "") === OWNER_EMAIL;
-        if (isOwnerLogin) {
-          const savedToken = await storage.getUserSpotifyToken(user.id);
-          if (savedToken) {
-            const ok = await restoreFromRefreshToken(savedToken);
-            console.log(`[Auth] Spotify restore on owner login: ${ok ? "OK" : "failed"}`);
-          }
+        // Restore each user's own Spotify session on login
+        const savedToken = await storage.getUserSpotifyToken(user.id);
+        if (savedToken) {
+          const ok = await restoreFromRefreshToken(user.id, savedToken);
+          console.log(`[Auth] Spotify restore on login for ${user.id}: ${ok ? "OK" : "failed"}`);
         }
         res.redirect("/");
       }
@@ -304,57 +298,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ── Spotify OAuth ─────────────────────────────────────────────────────────────
   app.get("/api/spotify/login", (req, res) => handleLogin(req, res, SPOTIFY_REDIRECT_URI));
   app.get("/api/spotify/callback", async (req, res) => {
-    await handleCallback(req, res, async (refreshToken) => {
-      const user = req.user as Express.User | undefined;
-      // Only save the token to the owner account — Spotify is owner-only
-      if (user?.id === OWNER_GOOGLE_ID || (user?.username?.toLowerCase() ?? "") === OWNER_EMAIL) {
-        await storage.updateUserSpotifyToken(user!.id, refreshToken);
-        console.log(`[Auth] Spotify token saved to owner account: ${user!.id}`);
-      }
+    const callbackUser = req.user as Express.User | undefined;
+    if (!callbackUser) return res.redirect("/?spotify=error&reason=not_logged_in");
+    await handleCallback(req, res, callbackUser.id, async (refreshToken) => {
+      await storage.updateUserSpotifyToken(callbackUser.id, refreshToken);
+      console.log(`[Spotify] Token saved for user: ${callbackUser.id}`);
     }, SPOTIFY_REDIRECT_URI);
   });
-  app.get("/api/spotify/queue", async (_req, res) => {
+  app.get("/api/spotify/queue", async (req, res) => {
     try {
-      const queue = await getQueue();
+      const uid = (req.user as Express.User | undefined)?.id;
+      if (!uid) return res.status(401).json({ error: "Not logged in" });
+      const queue = await getQueue(uid);
       if (!queue) return res.status(503).json({ error: "Spotify not connected" });
       res.json(queue);
     } catch { res.status(500).json({ error: "Failed to fetch queue" }); }
   });
 
-  app.get("/api/spotify/status", async (_req, res) => {
-    try { res.json(await getStatus()); }
+  app.get("/api/spotify/status", async (req, res) => {
+    try {
+      const uid = (req.user as Express.User | undefined)?.id;
+      if (!uid) return res.json({ connected: false, nowPlaying: null, configured: false });
+      res.json(await getStatus(uid));
+    }
     catch { res.status(500).json({ error: "Failed to get Spotify status" }); }
   });
-  app.get("/api/spotify/now-playing", async (_req, res) => {
-    try { res.json({ nowPlaying: await getNowPlaying() }); }
+  app.get("/api/spotify/now-playing", async (req, res) => {
+    try {
+      const uid = (req.user as Express.User | undefined)?.id;
+      if (!uid) return res.json({ nowPlaying: null });
+      res.json({ nowPlaying: await getNowPlaying(uid) });
+    }
     catch { res.status(500).json({ error: "Failed to get now playing" }); }
   });
   app.post("/api/spotify/player/:action", async (req, res) => {
-    try { res.json({ success: await playerAction(req.params.action) }); }
+    try {
+      const uid = (req.user as Express.User | undefined)?.id;
+      if (!uid) return res.status(401).json({ error: "Not logged in" });
+      res.json({ success: await playerAction(uid, req.params.action) });
+    }
     catch { res.status(500).json({ error: "Player action failed" }); }
   });
-  app.post("/api/spotify/disconnect", (_req, res) => {
-    disconnect(); setSdkDeviceId(null); res.json({ success: true });
+  app.post("/api/spotify/disconnect", (req, res) => {
+    const uid = (req.user as Express.User | undefined)?.id;
+    if (uid) disconnect(uid);
+    res.json({ success: true });
   });
   app.post("/api/spotify/play-context", async (req, res) => {
     const { uri } = req.body as { uri?: string };
     if (!uri) return res.status(400).json({ error: "uri required" });
+    const uid = (req.user as Express.User | undefined)?.id;
+    if (!uid) return res.status(401).json({ error: "Not logged in" });
     try {
-      const ok = await playContext(uri);
+      const ok = await playContext(uid, uri);
       res.json({ success: ok });
     } catch { res.status(500).json({ error: "Failed to play context" }); }
   });
   app.post("/api/spotify/play-tracks", async (req, res) => {
     const { uris } = req.body as { uris?: string[] };
     if (!uris?.length) return res.status(400).json({ error: "uris required" });
+    const uid = (req.user as Express.User | undefined)?.id;
+    if (!uid) return res.status(401).json({ error: "Not logged in" });
     try {
-      const ok = await playTracksInOrder(uris);
+      const ok = await playTracksInOrder(uid, uris);
       res.json({ success: ok });
     } catch { res.status(500).json({ error: "Failed to play tracks" }); }
   });
   app.get("/api/spotify/playlist/:id/tracks", async (req, res) => {
+    const uid = (req.user as Express.User | undefined)?.id;
+    if (!uid) return res.status(401).json({ error: "Not logged in" });
     try {
-      const tracks = await getPlaylistTracks(req.params.id, 30);
+      const tracks = await getPlaylistTracks(uid, req.params.id, 30);
       if (!tracks) return res.status(500).json({ error: "Failed to get tracks" });
       res.json(tracks);
     } catch { res.status(500).json({ error: "Failed to get playlist tracks" }); }
@@ -362,10 +376,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Debug: test raw Spotify endpoints
   app.get("/api/spotify/debug", async (req, res) => {
     try {
-      const token = await getAccessTokenForSdk();
+      const uid = (req.user as Express.User | undefined)?.id;
+      if (!uid) return res.status(401).json({ error: "Not logged in" });
+      const token = await getAccessTokenForSdk(uid);
       if (!token) return res.status(401).json({ error: "Not connected" });
       const artistName = (req.query.artist as string) || "Dardan";
-      // Step 1: artist search
       const artistSearchRes = await fetch(
         `https://api.spotify.com/v1/search?q=${encodeURIComponent(artistName)}&type=artist&limit=3`,
         { headers: { Authorization: `Bearer ${token}` } }
@@ -373,7 +388,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const artistSearchData = await artistSearchRes.json() as any;
       const artists: any[] = artistSearchData.artists?.items || [];
       const firstArtist = artists[0];
-      // Step 2: top-tracks (raw)
       let topTracksResult: any = null;
       if (firstArtist) {
         const ttRes = await fetch(
@@ -383,7 +397,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const ttBody = await ttRes.text();
         topTracksResult = { status: ttRes.status, body: ttBody.slice(0, 400) };
       }
-      // Step 3: track search fallback
       let trackSearchResult: any = null;
       if (firstArtist) {
         const tsRes = await fetch(
@@ -396,8 +409,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }));
         trackSearchResult = { status: tsRes.status, tracks };
       }
-      // Full getArtistTopTracks call
-      const fullResult = await getArtistTopTracks(artistName);
+      const fullResult = await getArtistTopTracks(uid, artistName);
       res.json({
         query: artistName,
         artistSearch: { count: artists.length, top: artists.map((a: any) => ({ name: a.name, id: a.id })) },
@@ -408,26 +420,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e) { res.status(500).json({ error: String(e) }); }
   });
   app.get("/api/spotify/test-artist", async (req, res) => {
+    const uid = (req.user as Express.User | undefined)?.id;
+    if (!uid) return res.status(401).json({ error: "Not logged in" });
     const name = (req.query.name as string) || "Dardan";
-    // Test raw fetch vs spotifyFetch
-    const token = await getAccessTokenForSdk();
+    const token = await getAccessTokenForSdk(uid);
     const url = `https://api.spotify.com/v1/search?q=${encodeURIComponent(name)}&type=track&limit=10`;
     const rawRes = token ? await fetch(url, { headers: { Authorization: `Bearer ${token}` } }) : null;
     const rawData = rawRes ? await rawRes.json() : null;
     const rawTracks = (rawData?.tracks?.items || []).map((t: any) => ({ name: t.name, artists: t.artists?.map((a: any) => a.name) }));
-    // Also run getArtistTopTracks
-    const result = await getArtistTopTracks(name);
+    const result = await getArtistTopTracks(uid, name);
     res.json({ name, rawStatus: rawRes?.status, rawCount: rawTracks.length, rawSample: rawTracks.slice(0, 3), result, count: result?.length ?? 0 });
   });
 
-  app.get("/api/spotify/sdk-token", async (_req, res) => {
-    const token = await getAccessTokenForSdk();
+  app.get("/api/spotify/sdk-token", async (req, res) => {
+    const uid = (req.user as Express.User | undefined)?.id;
+    if (!uid) return res.status(401).json({ error: "Not logged in" });
+    const token = await getAccessTokenForSdk(uid);
     if (!token) return res.status(401).json({ error: "Not connected" });
     res.json({ accessToken: token });
   });
   app.post("/api/spotify/device", (req, res) => {
+    const uid = (req.user as Express.User | undefined)?.id;
+    if (!uid) return res.status(401).json({ error: "Not logged in" });
     const { deviceId } = req.body as { deviceId: string };
-    if (deviceId) { setSdkDeviceId(deviceId); res.json({ success: true }); }
+    if (deviceId) { setSdkDeviceId(uid, deviceId); res.json({ success: true }); }
     else res.status(400).json({ error: "deviceId required" });
   });
 
@@ -649,7 +665,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           artistTopName || artistFromName || isPlaylistList || playlistPlayMatch ||
           queueAddMatch || isQueueShow || isRecommendations);
 
-        const status = await getStatus();
+        const status = await getStatus(userId);
 
         if (isMusicCommand && !status.connected) {
           const notConnectedMsgs: Record<string, string> = {
@@ -666,9 +682,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // ── Artist top track ─────────────────────────────────────────────
           if (artistTopName) {
-            const tracks = await getArtistTopTracks(artistTopName);
+            const tracks = await getArtistTopTracks(userId, artistTopName);
             if (tracks && tracks.length > 0) {
-              const ok = await playTracksInOrder(tracks.map(t => t.uri));
+              const ok = await playTracksInOrder(userId, tracks.map(t => t.uri));
               if (ok) {
                 directResponse = spotifyCard(
                   { type: "artist_tracks", artistName: tracks[0].artistName, playing: true, tracks },
@@ -692,9 +708,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // ── Artist "something from" ──────────────────────────────────────
           } else if (artistFromName) {
-            const tracks = await getArtistTopTracks(artistFromName);
+            const tracks = await getArtistTopTracks(userId, artistFromName);
             if (tracks && tracks.length > 0) {
-              const ok = await playTracksInOrder(tracks.map(t => t.uri));
+              const ok = await playTracksInOrder(userId, tracks.map(t => t.uri));
               if (ok) {
                 directResponse = spotifyCard(
                   { type: "artist_tracks", artistName: tracks[0].artistName, playing: true, tracks },
@@ -719,7 +735,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // ── List playlists ───────────────────────────────────────────────
           } else if (isPlaylistList) {
             console.log("[Chat] Playlist list intent");
-            const playlists = await getUserPlaylists();
+            const playlists = await getUserPlaylists(userId);
             if (playlists && playlists.length > 0) {
               directResponse = spotifyCard(
                 { type: "playlists", items: playlists },
@@ -740,19 +756,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const playlistName = (playlistPlayMatch[1] || "")
               .replace(/\b(my|meine[nm]?|mir|bitte|please)\b/gi, "").trim();
             console.log("[Chat] Playlist play intent, name:", playlistName);
-            const playlists = await getUserPlaylists();
+            const playlists = await getUserPlaylists(userId);
             const found = playlists?.find(p =>
               p.name.toLowerCase().includes(playlistName.toLowerCase()) ||
               playlistName.toLowerCase().includes(p.name.toLowerCase())
             );
             if (found) {
               // Try context play first; fall back to loading tracks individually
-              let ok = await playContext(found.uri);
+              let ok = await playContext(userId, found.uri);
               if (!ok) {
                 console.log("[Chat] Context play failed, falling back to track-by-track");
-                const tracks = await getPlaylistTracks(found.id, 30);
+                const tracks = await getPlaylistTracks(userId, found.id, 30);
                 if (tracks && tracks.length > 0) {
-                  ok = await playTracksInOrder(tracks.map(t => t.uri));
+                  ok = await playTracksInOrder(userId, tracks.map(t => t.uri));
                 }
               }
               directResponse = ok
@@ -774,18 +790,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // ── Show queue ───────────────────────────────────────────────────
           } else if (isQueueShow) {
             console.log("[Chat] Queue show intent");
-            const queue = await getQueue();
+            const queue = await getQueue(userId) as any;
             if (queue) {
-              const hasContent = queue.current || queue.upcoming.length > 0;
+              const hasContent = queue.currentlyPlaying || (queue.queue && queue.queue.length > 0);
               if (hasContent) {
                 directResponse = spotifyCard(
-                  { type: "queue", current: queue.current, upcoming: queue.upcoming },
+                  { type: "queue", current: queue.currentlyPlaying, upcoming: queue.queue || [] },
                   loc(
-                    queue.upcoming.length > 0
-                      ? `Hier ist deine aktuelle Warteschlange mit ${queue.upcoming.length} kommenden Songs!`
+                    (queue.queue?.length ?? 0) > 0
+                      ? `Hier ist deine aktuelle Warteschlange mit ${queue.queue.length} kommenden Songs!`
                       : "Hier ist was gerade läuft — die Warteschlange ist danach leer.",
-                    queue.upcoming.length > 0
-                      ? `Here's your current queue with ${queue.upcoming.length} upcoming songs!`
+                    (queue.queue?.length ?? 0) > 0
+                      ? `Here's your current queue with ${queue.queue.length} upcoming songs!`
                       : "Here's what's playing — the queue is empty after this."
                   )
                 );
@@ -812,9 +828,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const searchQuery = byMatch
               ? `track:"${byMatch[1].trim()}" artist:"${byMatch[2].trim()}"`
               : `track:"${queueQuery}"`;
-            const tracks = await searchTracks(searchQuery, 1);
+            const tracks = await searchTracks(userId, searchQuery, 1);
             if (tracks && tracks.length > 0) {
-              const ok = await addToQueue(tracks[0].uri);
+              const ok = await addToQueue(userId, tracks[0].uri);
               directResponse = ok
                 ? loc(
                     `"${tracks[0].name}" von ${tracks[0].artistName} wurde zur Warteschlange hinzugefügt!`,
@@ -834,16 +850,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // ── Recommendations ──────────────────────────────────────────────
           } else if (isRecommendations) {
             console.log("[Chat] Recommendations intent");
-            const nowPlaying = await getNowPlaying() as any;
+            const nowPlaying = await getNowPlaying(userId) as any;
             if (!nowPlaying?.trackId) {
               directResponse = loc(
                 "Es läuft gerade kein Song. Starte einen Song und frag mich dann für Empfehlungen!",
                 "Nothing is playing right now. Start a song first and then ask for recommendations!"
               );
             } else {
-              const tracks = await getRecommendations(nowPlaying.trackId, nowPlaying.artistId);
+              const tracks = await getRecommendations(userId, nowPlaying.trackId, nowPlaying.artistId);
               if (tracks && tracks.length > 0) {
-                const ok = await playTracksInOrder(tracks.map(t => t.uri));
+                const ok = await playTracksInOrder(userId, tracks.map(t => t.uri));
                 if (ok) {
                   directResponse = spotifyCard(
                     { type: "artist_tracks", artistName: "Recommendations", playing: true, tracks },
@@ -882,20 +898,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
             console.log("[Chat] Play intent detected, raw:", rawQuery, "→ query:", query);
             // Search for the track first so we can build a proper URI list
-            const foundTracks = await searchTracks(query, 1);
+            const foundTracks = await searchTracks(userId, query, 1);
             if (foundTracks && foundTracks.length > 0) {
               const mainTrack = foundTracks[0];
               // Get artist top tracks to build a sequential context (so "next" works)
               let allTracks = [mainTrack];
               try {
                 const firstArtist = mainTrack.artistName.split(",")[0].trim();
-                const artistTracks = await getArtistTopTracks(firstArtist);
+                const artistTracks = await getArtistTopTracks(userId, firstArtist);
                 if (artistTracks && artistTracks.length > 1) {
                   const extras = artistTracks.filter(t => t.uri !== mainTrack.uri).slice(0, 9);
                   allTracks = [mainTrack, ...extras];
                 }
               } catch { /* non-fatal */ }
-              const ok = await playTracksInOrder(allTracks.map(t => t.uri));
+              const ok = await playTracksInOrder(userId, allTracks.map(t => t.uri));
               if (ok) {
                 directResponse = spotifyCard(
                   { type: "artist_tracks", artistName: mainTrack.artistName, playing: true, tracks: allTracks },
@@ -919,29 +935,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // ── Playback controls ─────────────────────────────────────────────
           } else if (isSkip) {
-            const ok = await playerAction("next");
+            const ok = await playerAction(userId, "next");
             directResponse = ok
               ? loc("Übersprungen! Genieße den nächsten Track.", "Skipped! Enjoy the next track.")
               : loc("Konnte nicht überspringen — stelle sicher, dass Spotify aktiv ist.", "Couldn't skip — make sure Spotify is active on a device.");
           } else if (isPrev) {
-            const ok = await playerAction("previous");
+            const ok = await playerAction(userId, "previous");
             directResponse = ok
               ? loc("Zurück zum vorherigen Track.", "Went back to the previous track.")
               : loc("Konnte nicht zurückgehen — stelle sicher, dass Spotify aktiv ist.", "Couldn't go back — make sure Spotify is active.");
           } else if (isPause) {
-            const ok = await playerAction("pause");
+            const ok = await playerAction(userId, "pause");
             directResponse = ok
               ? loc("Pausiert.", "Paused.")
               : loc("Konnte nicht pausieren — stelle sicher, dass Spotify aktiv ist.", "Couldn't pause — make sure Spotify is active.");
           } else if (isResume) {
-            const ok = await playerAction("play");
+            const ok = await playerAction(userId, "play");
             directResponse = ok
               ? loc("Fortgesetzt!", "Resumed!")
               : loc("Konnte nicht fortsetzen — stelle sicher, dass Spotify aktiv ist.", "Couldn't resume — make sure Spotify is active.");
           }
 
           if (!directResponse) {
-            const nowPlaying = await getNowPlaying();
+            const nowPlaying = await getNowPlaying(userId);
             if (nowPlaying) {
               const np = nowPlaying as { trackName: string; artistName: string; isPlaying: boolean };
               systemPrompt += `\n\nThe user is currently ${np.isPlaying ? "listening to" : "paused on"} "${np.trackName}" by ${np.artistName} on Spotify.`;
