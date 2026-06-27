@@ -55,10 +55,16 @@ const groqClients: Groq[] = [
   .filter(Boolean)
   .map((key) => new Groq({ apiKey: key as string }));
 
-const replitAI = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+let _replitAI: OpenAI | null = null;
+function getReplitAI(): OpenAI {
+  if (!_replitAI) {
+    _replitAI = new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || "placeholder",
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    });
+  }
+  return _replitAI;
+}
 
 type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
 
@@ -76,7 +82,7 @@ async function chatCompletion(messages: ChatMsg[], maxTokens: number, light = fa
     }
   }
   console.log("[AI] All Groq keys exhausted, using Replit AI");
-  const response = await replitAI.chat.completions.create({
+  const response = await getReplitAI().chat.completions.create({
     model: "gpt-4o-mini",
     messages,
     max_tokens: maxTokens,
